@@ -274,22 +274,39 @@ createApp({
   <div class="ov" v-if="sa" @click.self="close"><div class="modal"><div class="modal-h"><h3>创建 Key</h3><button class="x" @click="close">&times;</button></div><div class="modal-b"><template v-if="res"><div class="field"><label>新 Key</label><div class="keybox">{{res}}</div><button class="btn s pri" style="margin-top:8px" @click="cp(res)">复制</button><div class="hint">只显示这一次，关闭后无法再次查看完整 Key。</div></div></template><template v-else><div class="field"><label>名称</label><input v-model="f.name" placeholder="OpenClaw"/></div><div class="field"><label>允许模型</label><input v-model="f.models" placeholder="auto,glm-5.2（留空=全部）"/></div><div class="field"><label>每日请求限额</label><input v-model="f.limit" type="number" placeholder="不限"/></div></template></div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res">创建</button></div></div></div>
 </div>`
 }).component('mdls',{props:['token','toast'],setup(p){
-  const m=ref([]),ld=ref(true);
-  async function load(){ld.value=true;try{m.value=await api.get('/admin/models',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
-  async function save(){try{await api.put('/admin/models',m.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
+  const m=ref([]),al=ref({}),ld=ref(true);
+  async function load(){ld.value=true;try{m.value=await api.get('/admin/models',p.token);al.value=await api.get('/admin/aliases',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
+  async function save(){try{await api.put('/admin/models',m.value,p.token);await api.put('/admin/aliases',al.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
   function add(){m.value.push({id:'',name:''})}function rm(i){m.value.splice(i,1)}
-  onMounted(load);return{m,ld,load,save,add,rm}
+  function addAlias(){al.value['']= ''; al.value = {...al.value}} 
+  function rmAlias(k){const o={...al.value};delete o[k];al.value=o}
+  onMounted(load);return{m,al,ld,load,save,add,rm,addAlias,rmAlias,I}
 },template:`
 <div>
-  <div class="phead"><h1>模型配置</h1><p>/v1/models 列表</p></div>
-  <div class="tbar"><button class="btn s pri" @click="save">保存</button><button class="btn s" @click="add"><span v-html="I.plus"></span>添加</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
+  <div class="phead"><h1>模型配置</h1><p>/v1/models 列表 &amp; 别名映射</p></div>
+  <div class="tbar"><button class="btn s pri" @click="save">保存全部</button><button class="btn s" @click="add"><span v-html="I.plus"></span>添加模型</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
-  <div class="card" v-else><table><thead><tr><th>ID</th><th>名称</th><th></th></tr></thead><tbody>
+  <template v-else>
+  <div class="card"><div class="card-h">模型列表<span class="sub">/v1/models</span></div>
+    <table><thead><tr><th>ID</th><th>名称</th><th></th></tr></thead><tbody>
     <tr v-for="(x,i) in m" :key="i"><td><input v-model="x.id" style="width:100%;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px;font-family:var(--mono)"/></td><td><input v-model="x.name" style="width:100%;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px"/></td><td><button class="btn s danger" @click="rm(i)">删除</button></td></tr>
-  </tbody></table></div>
+    <tr v-if="!m.length"><td colspan="3" class="empty">暂无模型</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card"><div class="card-h">别名映射<span class="sub">客户端名称 → 后端模型</span><button class="btn s" @click="addAlias" style="margin-left:8px"><span v-html="I.plus"></span>添加</button></div>
+    <table><thead><tr><th>别名（客户端用）</th><th>→ 后端模型 ID</th><th></th></tr></thead><tbody>
+    <tr v-for="(v,k) in al" :key="k"><td class="mono" style="font-weight:600">{{k}}</td><td class="mono">{{v}}</td><td><button class="btn s danger" @click="rmAlias(k)">删除</button></td></tr>
+    <tr v-if="!Object.keys(al).length"><td colspan="3" class="empty">暂无自定义别名</td></tr>
+    </tbody></table>
+    <div style="padding:12px 16px;font-size:12px;color:var(--fg3);border-top:1px solid var(--border2)">
+      内置别名：gpt-4o→glm-5.2, gpt-4o-mini→glm-5.1, claude-3.5-sonnet→deepseek-v4-pro, deepseek-chat→deepseek-v4-pro, moonshot-v1-128k→kimi-k2.7
+    </div>
+  </div>
+  </template>
   <div class="card card-p" style="margin-top:16px"><div style="font-weight:600;font-size:13px;margin-bottom:10px">接入说明</div><div class="codeblk"><span class="k">Base URL</span>: http://127.0.0.1:8787/v1
 <span class="k">API Key</span>:  在 API Keys 页面创建
 <span class="k">Models</span>:   auto, glm-5.2, kimi-k2.7, deepseek-v4-pro
+<span class="k">Aliases</span>:  gpt-4o, gpt-4o-mini, claude-3.5-sonnet（自动映射）
 <span class="k">Stream</span>:   建议开启</div></div>
 </div>`
 }).component('lgs',{props:['token'],setup(p){

@@ -44,14 +44,45 @@ DEFAULT_MODELS = [
     {"id": "auto", "name": "Auto (auto routing)"},
 ]
 
+# Built-in model aliases: alias_id -> backend_model_id
+# Extended by user-defined aliases from database settings "model_aliases".
+_BUILTIN_ALIASES = {
+    "gpt-4o": "glm-5.2",
+    "gpt-4o-mini": "glm-5.1",
+    "gpt-4-turbo": "glm-5.2",
+    "gpt-4": "glm-5.2",
+    "gpt-3.5-turbo": "glm-5.1",
+    "claude-3.5-sonnet": "deepseek-v4-pro",
+    "claude-3-haiku": "deepseek-v4-flash",
+    "deepseek-chat": "deepseek-v4-pro",
+    "deepseek-coder": "deepseek-v4-pro",
+    "moonshot-v1-128k": "kimi-k2.7",
+    "moonshot-v1-32k": "kimi-k2.6",
+}
+
+
+def resolve_model_alias(model: str) -> str:
+    """Resolve an alias to its real backend model ID. Returns original if no match."""
+    aliases = db.get_setting("model_aliases", {})
+    merged = {**_BUILTIN_ALIASES, **aliases}
+    return merged.get(model, model)
+
 
 def build_backend_body(payload: dict) -> dict:
     body = {k: payload[k] for k in PASSTHROUGH_BODY_KEYS if k in payload}
-    body.setdefault("model", "auto")
+    # Resolve model alias before forwarding
+    raw_model = body.get("model", "auto")
+    body["model"] = resolve_model_alias(raw_model)
     body["stream"] = True
     if "stream_options" not in body:
         body["stream_options"] = {"include_usage": True}
     return body
+
+
+def get_all_aliases() -> dict:
+    """Return merged aliases (built-in + user-defined)."""
+    user_aliases = db.get_setting("model_aliases", {})
+    return {**_BUILTIN_ALIASES, **user_aliases}
 
 
 def _safe_err(raw: bytes, status: int) -> dict:
@@ -221,6 +252,7 @@ async def _collect_stream(
 ) -> tuple:
     """聚合 SSE 流为单个非流式 JSON。"""
     content_parts: list[str] = []
+    reasoning_parts: list[str] = []
     tool_calls: dict[int, dict] = {}
     model: str | None = None
     finish_reason: str | None = None
@@ -257,6 +289,8 @@ async def _collect_stream(
                         delta = choice.get("delta") or {}
                         if delta.get("content"):
                             content_parts.append(delta["content"])
+                        if delta.get("reasoning_content"):
+                            reasoning_parts.append(delta["reasoning_content"])
                         for tc in delta.get("tool_calls") or []:
                             idx = tc.get("index", 0)
                             slot = tool_calls.setdefault(idx, {"id": None, "name": None, "arguments": ""})
@@ -282,6 +316,8 @@ async def _collect_stream(
         finish_reason = finish_reason or "tool_calls"
 
     message = {"role": "assistant", "content": "".join(content_parts) or None}
+    if reasoning_parts:
+        message["reasoning_content"] = "".join(reasoning_parts)
     if tcs:
         message["tool_calls"] = tcs
     result = {

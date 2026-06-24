@@ -348,6 +348,27 @@ async def admin_update_models(
     return {"status": "ok"}
 
 
+# --- Model Aliases ---
+
+@app.get("/admin/aliases")
+async def admin_get_aliases(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return proxy.get_all_aliases()
+
+
+@app.put("/admin/aliases")
+async def admin_update_aliases(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    # Only store user-defined aliases (not built-in ones)
+    user_aliases = {k: v for k, v in data.items() if k not in proxy._BUILTIN_ALIASES}
+    db.set_setting("model_aliases", user_aliases)
+    return {"status": "ok"}
+
+
 # ============================================================
 # Web UI
 # ============================================================

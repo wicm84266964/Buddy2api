@@ -15,3 +15,4 @@ logs/
 .venv/
 venv/
 _mimo-backup-*/
+.lab-agent/
