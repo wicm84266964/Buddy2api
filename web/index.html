@@ -201,6 +201,7 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .codeblk .k{color:var(--blue);font-weight:600}.codeblk .s{color:#7a5a00}
 .keybox{font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border);padding:8px 12px;border-radius:4px;word-break:break-all;user-select:all}
 .tag{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11px;background:var(--hover);color:var(--fg2)}
+.tag.warn{background:#fff8e8;color:#9a6a00}
 @media (max-width:900px){
   .side{position:static;width:100%;height:auto}.layout{display:block}.main{margin-left:0}.content{padding:18px;max-width:none}
   .stats,.dash-grid,.dash-grid.wide,.dash-grid.thirds,.dash-hero,.detect-grid,.detect-custom{grid-template-columns:1fr}
@@ -235,11 +236,14 @@ const api={
 function apiErr(e,fallback='加载失败'){return e.message==='401'?'本机管理凭证无效，请刷新页面；远程访问时再使用左下角备用 Token。':fallback}
 createApp({
   setup(){
-    const page=ref('dashboard'),token=ref(localStorage.getItem('cb_gw_token')||''),ti=ref(''),st=ref(false),toast=ref(null);
-    function tf(m,t='ok'){toast.value={m,t};setTimeout(()=>toast.value=null,2500)}
+    const validPages=['dashboard','accounts','keys','models','logs','settings'];
+    const savedPage=localStorage.getItem('cb_gw_page');
+    const page=ref(validPages.includes(savedPage)?savedPage:'dashboard'),token=ref(localStorage.getItem('cb_gw_token')||''),ti=ref(''),st=ref(false),toasts=ref([]);
+    function tf(m,t='ok'){const id=Date.now()+Math.random();toasts.value=[...toasts.value,{id,m,t}].slice(-4);setTimeout(()=>toasts.value=toasts.value.filter(x=>x.id!==id),2500)}
     function sv(){token.value=ti.value;localStorage.setItem('cb_gw_token',ti.value);st.value=false;ti.value='';tf('已保存')}
+    function go(k){page.value=k;localStorage.setItem('cb_gw_page',k)}
     const nav=[{k:'dashboard',l:'Dashboard',i:I.dash},{k:'accounts',l:'账号管理',i:I.users},{k:'keys',l:'API Keys',i:I.key},{k:'models',l:'模型配置',i:I.cpu},{k:'logs',l:'请求日志',i:I.log},{k:'settings',l:'设置',i:I.gear}];
-    return{page,token,ti,st,toast,tf,sv,nav,I}
+    return{page,token,ti,st,toasts,tf,sv,go,nav,I}
   },
   template:`
   <div class="layout">
@@ -248,15 +252,15 @@ createApp({
       <div class="side-nav">
         <div class="nav-grp">
           <div class="nav-grp-label">概览</div>
-          <div v-for="n in nav.slice(0,1)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
+          <div v-for="n in nav.slice(0,1)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="go(n.k)" v-html="n.i+'<span>'+n.l+'</span>'"></div>
         </div>
         <div class="nav-grp">
           <div class="nav-grp-label">管理</div>
-          <div v-for="n in nav.slice(1,5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
+          <div v-for="n in nav.slice(1,5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="go(n.k)" v-html="n.i+'<span>'+n.l+'</span>'"></div>
         </div>
         <div class="nav-grp">
           <div class="nav-grp-label">系统</div>
-          <div v-for="n in nav.slice(5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
+          <div v-for="n in nav.slice(5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="go(n.k)" v-html="n.i+'<span>'+n.l+'</span>'"></div>
         </div>
       </div>
       <div class="side-foot"><a @click="st=true;ti=token"><span class="dot"></span>{{token?'备用 Token 已设':'本机自动验证'}}</a></div>
@@ -270,11 +274,11 @@ createApp({
       <div class="content" v-if="page==='settings'"><stgs :token="token" :toast="tf"/></div>
     </div>
     <div class="ov" v-if="st" @click.self="st=false"><div class="modal"><div class="modal-h"><h3>备用 Admin Token</h3><button class="x" @click="st=false">&times;</button></div><div class="modal-b"><div class="field"><label>Token</label><input v-model="ti" type="password" placeholder="远程访问或 Cookie 失效时才需要"/><div class="hint">本机打开 127.0.0.1:8787 会自动验证，通常不用填写。</div></div></div><div class="modal-f"><button class="btn" @click="st=false">取消</button><button class="btn pri" @click="sv">保存</button></div></div></div>
-    <div class="toasts"><div class="toast" :class="toast?.t" v-if="toast">{{toast.m}}</div></div>
+    <div class="toasts"><div class="toast" :class="x.t" v-for="x in toasts" :key="x.id">{{x.m}}</div></div>
   </div>`
 }).component('dash',{props:['token','toast'],setup(p){
-  const s=ref(null),ld=ref(true),copied=ref(''),err=ref('');
-  async function load(){ld.value=true;err.value='';try{s.value=await api.get('/admin/stats',p.token)}catch(e){s.value=null;err.value=e.message==='401'?'Admin Token 无效或未设置':'加载失败：'+e.message;p.toast('加载失败','err')}ld.value=false}
+  const s=ref(null),ld=ref(true),copied=ref(''),err=ref(''),updatedAt=ref('');
+  async function load(){ld.value=true;err.value='';try{s.value=await api.get('/admin/stats',p.token);updatedAt.value=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}catch(e){s.value=null;err.value=apiErr(e,'加载失败：'+e.message);p.toast(err.value,'err')}ld.value=false}
   function n(v){return Number(v||0).toLocaleString()}
   function pct(v){return (Number(v||0)).toFixed(Number(v||0)%1?1:0)+'%'}
   function money(v){return Number(v||0).toFixed(4).replace(/\.?0+$/,'')}
@@ -287,13 +291,13 @@ createApp({
   function copy(v,name){navigator.clipboard.writeText(v);copied.value=name;p.toast('已复制','info');setTimeout(()=>copied.value='',1200)}
   const mx=computed(()=>s.value?.daily?.length?Math.max(...s.value.daily.map(d=>d.requests),1):1);
   onMounted(load);
-  return{s,ld,copied,err,load,n,pct,money,ms,fmt,healthClass,healthText,rateWidth,modelPct,copy,mx,I}
+  return{s,ld,copied,err,updatedAt,load,n,pct,money,ms,fmt,healthClass,healthText,rateWidth,modelPct,copy,mx,I}
 },template:`
 <div>
   <div class="phead"><h1>Dashboard</h1><p>网关运行状态、今日用量和最近请求</p></div>
-  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div><span class="tag" v-if="s">Base URL · 127.0.0.1:8787/v1</span></div>
+  <div class="tbar"><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button><div class="spacer"></div><span class="tag" v-if="updatedAt">更新 {{updatedAt}}</span><span class="tag" v-if="s">Base URL · 127.0.0.1:8787/v1</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
-  <div class="card card-p empty" v-else-if="err"><div class="em">!</div><p style="font-weight:600;color:var(--fg)">{{err}}</p><p style="margin-top:6px">请点击左下角「设置 Token」，填入服务启动日志里的 Admin Token。</p></div>
+  <div class="card card-p empty" v-else-if="err"><div class="em">!</div><p style="font-weight:600;color:var(--fg)">{{err}}</p><p style="margin-top:6px">本机访问通常刷新页面即可重新获取管理凭证。</p></div>
   <template v-else-if="s">
     <div class="dash-hero">
       <div>
@@ -391,21 +395,25 @@ createApp({
   </template>
 </div>`
 }).component('accs',{props:['token','toast'],setup(p){
-  const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref(''),disc=ref(null),dl=ref(false),authPath=ref(''),test=ref(null),tl=ref(0);
-  async function load(){ld.value=true;try{l.value=(await api.get('/admin/accounts',p.token)).map(a=>({...a,_weight:a.weight||1,_priority:a.priority||0}))}catch(e){p.toast(apiErr(e),'err')}ld.value=false}
+  const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref(''),disc=ref(null),dl=ref(false),scanning=ref(false),adding=ref(false),authPath=ref(''),test=ref(null),tl=ref(0),busy=ref({});
+  function hydrate(a){return {...a,_weight:a.weight||1,_priority:a.priority||0,_baseWeight:a.weight||1,_basePriority:a.priority||0}}
+  function dirty(a){return Number(a._weight||1)!==Number(a._baseWeight||1)||Number(a._priority||0)!==Number(a._basePriority||0)}
+  function busyKey(id,k){return busy.value[id+'-'+k]}
+  async function load(){ld.value=true;try{l.value=(await api.get('/admin/accounts',p.token)).map(hydrate)}catch(e){p.toast(apiErr(e),'err')}ld.value=false}
   async function discover(path=''){dl.value=true;try{const q=path&&path.trim()?('?auth_dir='+encodeURIComponent(path.trim())):'';disc.value=await api.get('/admin/accounts/discover'+q,p.token)}catch(e){p.toast(apiErr(e,'检测失败'),'err')}dl.value=false}
-  async function scan(path=''){try{const body=path&&path.trim()?{auth_dir:path.trim()}:{};const r=await api.post('/admin/accounts/scan',body,p.token);p.toast('导入 '+r.imported+' · 更新 '+r.updated+' · 跳过 '+r.skipped);await load();await discover(path)}catch(e){p.toast(apiErr(e,'扫描失败'),'err')}}
+  async function scan(path=''){if(scanning.value)return;scanning.value=true;try{const body=path&&path.trim()?{auth_dir:path.trim()}:{};const r=await api.post('/admin/accounts/scan',body,p.token);p.toast('导入 '+r.imported+' · 更新 '+r.updated+' · 跳过 '+r.skipped);await load();await discover(path)}catch(e){p.toast(apiErr(e,'扫描失败'),'err')}scanning.value=false}
   async function scanCustom(){const path=authPath.value.trim();if(!path){p.toast('请先填写目录或 .info 文件路径','err');return}await scan(path)}
-  async function add(){try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load();await discover(authPath.value)}catch(e){p.toast('失败:'+e.message,'err')}}
-  async function ref2(id){try{await api.post('/admin/accounts/'+id+'/refresh',{},p.token);p.toast('刷新成功');await load()}catch(e){p.toast('失败','err')}}
-  async function saveMeta(a){try{await api.put('/admin/accounts/'+a.id,{weight:parseInt(a._weight)||1,priority:parseInt(a._priority)||0},p.token);p.toast('已保存');await load()}catch(e){p.toast(apiErr(e,'保存失败'),'err')}}
-  async function toggle(a){try{await api.put('/admin/accounts/'+a.id,{status:a.status==='active'?'inactive':'active'},p.token);p.toast(a.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast(apiErr(e,'操作失败'),'err')}}
+  async function add(){if(adding.value)return;if(!ai.value.trim()){p.toast('请先粘贴 Auth JSON','err');return}adding.value=true;try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load();await discover(authPath.value)}catch(e){p.toast('失败:'+e.message,'err')}adding.value=false}
+  async function withBusy(a,k,fn){busy.value={...busy.value,[a.id+'-'+k]:true};try{return await fn()}finally{const o={...busy.value};delete o[a.id+'-'+k];busy.value=o}}
+  async function ref2(a){await withBusy(a,'refresh',async()=>{try{await api.post('/admin/accounts/'+a.id+'/refresh',{},p.token);p.toast('刷新成功');await load()}catch(e){p.toast(apiErr(e,'刷新失败'),'err')}})}
+  async function saveMeta(a){await withBusy(a,'save',async()=>{try{await api.put('/admin/accounts/'+a.id,{weight:parseInt(a._weight)||1,priority:parseInt(a._priority)||0},p.token);a._baseWeight=parseInt(a._weight)||1;a._basePriority=parseInt(a._priority)||0;p.toast('已保存');await load()}catch(e){p.toast(apiErr(e,'保存失败'),'err')}})}
+  async function toggle(a){await withBusy(a,'toggle',async()=>{try{await api.put('/admin/accounts/'+a.id,{status:a.status==='active'?'inactive':'active'},p.token);p.toast(a.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast(apiErr(e,'操作失败'),'err')}})}
   async function testOne(a){tl.value=a.id;test.value=null;try{const r=await api.post('/admin/accounts/'+a.id+'/test',{model:'auto',prompt:'ping'},p.token);test.value={account:a.nickname||a.name,result:r};p.toast(r.ok?'测试成功':'测试失败',r.ok?'ok':'err');await load()}catch(e){p.toast(apiErr(e,'测试失败'),'err');test.value={account:a.nickname||a.name,result:{ok:false,status_code:0,message:e.message}}}tl.value=0}
-  async function del(id){if(!confirm('删除?'))return;await api.del('/admin/accounts/'+id,p.token);p.toast('已删除');await load();await discover(authPath.value)}
+  async function del(a){if(!confirm('删除账号 '+(a.nickname||a.name||a.id)+' ?'))return;await api.del('/admin/accounts/'+a.id,p.token);p.toast('已删除');await load();await discover(authPath.value)}
   function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}
   function size(v){v=Number(v||0);if(v>=1024*1024)return(v/1024/1024).toFixed(1)+' MB';if(v>=1024)return(v/1024).toFixed(1)+' KB';return v+' B'}
   function clearPath(){authPath.value='';discover('')}
-  onMounted(()=>{load();discover()});return{l,ld,sa,ai,nm,disc,dl,authPath,test,tl,load,discover,scan,scanCustom,add,ref2,saveMeta,toggle,testOne,del,fmt,size,clearPath,I}
+  onMounted(()=>{load();discover()});return{l,ld,sa,ai,nm,disc,dl,scanning,adding,authPath,test,tl,busyKey,dirty,load,discover,scan,scanCustom,add,ref2,saveMeta,toggle,testOne,del,fmt,size,clearPath,I}
 },template:`
 <div>
   <div class="phead"><h1>账号管理</h1><p>多账号轮询 · 最少使用优先</p></div>
@@ -419,7 +427,7 @@ createApp({
           <div class="hint">Work Buddy 已在本机登录时，通常直接点“一键导入”即可；路径不标准时再填下面的自定义路径。</div>
         </div>
         <div class="detect-actions">
-          <button class="btn s pri" @click="scan('')" :disabled="dl||!disc?.valid_count"><span v-html="I.scan"></span>一键导入本机登录</button>
+          <button class="btn s pri" @click="scan('')" :disabled="dl||scanning||!disc?.valid_count"><span v-html="I.scan"></span>{{scanning?'导入中':'一键导入本机登录'}}</button>
           <button class="btn s" @click="discover('')" :disabled="dl"><span v-html="I.refresh"></span>重新检测</button>
         </div>
       </div>
@@ -441,7 +449,7 @@ createApp({
             <div class="detect-custom">
               <input v-model="authPath" placeholder="auth 目录或 workbuddy-desktop.info 完整路径"/>
               <button class="btn s" @click="discover(authPath)" :disabled="dl">检测</button>
-              <button class="btn s pri" @click="scanCustom" :disabled="dl">导入</button>
+              <button class="btn s pri" @click="scanCustom" :disabled="dl||scanning">{{scanning?'导入中':'导入'}}</button>
               <button class="btn s" @click="clearPath" :disabled="dl">清空</button>
             </div>
             <div class="hint">可以直接粘贴 <span class="mono">C:/Users/.../auth</span> 或某个 <span class="mono">.info</span> 文件路径。</div>
@@ -456,34 +464,36 @@ createApp({
       </template>
     </div>
   </div>
-  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新列表</button><button class="btn s" @click="sa=true"><span v-html="I.plus"></span>高级手动添加</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个 · {{l.filter(a=>a.status==='active').length}}活跃</span></div>
+  <div class="tbar"><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新列表'}}</button><button class="btn s" @click="sa=true"><span v-html="I.plus"></span>高级手动添加</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个 · {{l.filter(a=>a.status==='active').length}}活跃</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
   <div class="card" v-else-if="l.length"><table><thead><tr><th>账号</th><th>UID</th><th>状态</th><th>权重</th><th>优先级</th><th>剩余</th><th>请求</th><th>Token</th><th>Credit</th><th></th></tr></thead><tbody>
-    <tr v-for="a in l" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name}}</td><td class="mono">{{a.uid?.slice(0,8)}}…</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td><input class="numctl" v-model.number="a._weight" type="number" min="1" max="100"/></td><td><input class="numctl" v-model.number="a._priority" type="number" min="-100" max="100"/></td><td>{{a.token_expired?'过期':a.remaining_hours+'h'}}</td><td>{{a.total_requests}}</td><td>{{a.total_tokens?.toLocaleString()}}</td><td>{{a.total_credits}}</td><td><div class="ops"><button class="btn s" @click="saveMeta(a)">保存</button><button class="btn s" @click="toggle(a)">{{a.status==='active'?'禁用':'启用'}}</button><button class="btn s" @click="testOne(a)" :disabled="tl===a.id">{{tl===a.id?'测试中':'测试'}}</button><button class="btn s" @click="ref2(a.id)">刷新</button><button class="btn s danger" @click="del(a.id)">删除</button></div></td></tr>
+    <tr v-for="a in l" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name}} <span class="tag warn" v-if="dirty(a)">未保存</span></td><td class="mono">{{a.uid?.slice(0,8)}}…</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td><input class="numctl" v-model.number="a._weight" type="number" min="1" max="100"/></td><td><input class="numctl" v-model.number="a._priority" type="number" min="-100" max="100"/></td><td>{{a.token_expired?'过期':a.remaining_hours+'h'}}</td><td>{{a.total_requests}}</td><td>{{a.total_tokens?.toLocaleString()}}</td><td>{{a.total_credits}}</td><td><div class="ops"><button class="btn s" @click="saveMeta(a)" :disabled="!dirty(a)||busyKey(a.id,'save')">{{busyKey(a.id,'save')?'保存中':'保存'}}</button><button class="btn s" @click="toggle(a)" :disabled="busyKey(a.id,'toggle')">{{busyKey(a.id,'toggle')?'处理中':(a.status==='active'?'禁用':'启用')}}</button><button class="btn s" @click="testOne(a)" :disabled="tl===a.id">{{tl===a.id?'测试中':'测试'}}</button><button class="btn s" @click="ref2(a)" :disabled="busyKey(a.id,'refresh')">{{busyKey(a.id,'refresh')?'刷新中':'刷新'}}</button><button class="btn s danger" @click="del(a)">删除</button></div></td></tr>
   </tbody></table></div>
   <div class="card card-p empty" v-else><div class="em">🔌</div><p>暂无账号 · 先使用上方本机登录检测导入</p></div>
   <div class="ov" v-if="test" @click.self="test=null"><div class="modal"><div class="modal-h"><h3>账号测试 · {{test.account}}</h3><button class="x" @click="test=null">&times;</button></div><div class="modal-b"><div class="testbox"><div class="row"><span>状态</span><span><span class="badge" :class="test.result.ok?'ok':'err'">{{test.result.ok?'成功':'失败'}}</span></span></div><div class="row"><span>HTTP</span><span class="mono">{{test.result.status_code}}</span></div><div class="row"><span>耗时</span><span class="mono">{{test.result.duration_ms}}ms</span></div><div class="row" v-if="test.result.model"><span>模型</span><span class="mono">{{test.result.model}}</span></div><div class="row" v-if="test.result.usage"><span>Token</span><span class="mono">{{test.result.usage.total_tokens||0}}</span></div><div class="msg">{{test.result.message||'无返回内容'}}</div></div><div class="hint" style="margin-top:8px">测试会发送一次极短请求，并记录到请求日志。</div></div><div class="modal-f"><button class="btn pri" @click="test=null">关闭</button></div></div></div>
-  <div class="ov" v-if="sa" @click.self="sa=false"><div class="modal"><div class="modal-h"><h3>高级手动添加</h3><button class="x" @click="sa=false">&times;</button></div><div class="modal-b"><div class="field"><label>名称</label><input v-model="nm" placeholder="可选"/></div><div class="field"><label>Auth JSON</label><textarea v-model="ai" placeholder="粘贴 .info 文件内容"></textarea><div class="hint">只有自动检测失败时才需要手动粘贴完整 JSON。</div></div></div><div class="modal-f"><button class="btn" @click="sa=false">取消</button><button class="btn pri" @click="add">添加</button></div></div></div>
+  <div class="ov" v-if="sa" @click.self="sa=false"><div class="modal"><div class="modal-h"><h3>高级手动添加</h3><button class="x" @click="sa=false">&times;</button></div><div class="modal-b"><div class="field"><label>名称</label><input v-model="nm" placeholder="可选"/></div><div class="field"><label>Auth JSON</label><textarea v-model="ai" placeholder="粘贴 .info 文件内容"></textarea><div class="hint">只有自动检测失败时才需要手动粘贴完整 JSON。</div></div></div><div class="modal-f"><button class="btn" @click="sa=false" :disabled="adding">取消</button><button class="btn pri" @click="add" :disabled="adding">{{adding?'添加中':'添加'}}</button></div></div></div>
 </div>`
 }).component('keys',{props:['token','toast'],setup(p){
-  const l=ref([]),ld=ref(true),sa=ref(false),f=reactive({name:'',models:'',limit:null}),res=ref('');
-  async function load(){ld.value=true;try{l.value=await api.get('/admin/api-keys',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
-  async function create(){try{const b={name:f.name};if(f.models)b.allowed_models=f.models.split(',').map(s=>s.trim()).filter(Boolean);if(f.limit)b.daily_limit=parseInt(f.limit);const r=await api.post('/admin/api-keys',b,p.token);res.value=r.key;p.toast('创建成功');await load()}catch(e){p.toast('失败','err')}}
-  async function toggle(k){await api.put('/admin/api-keys/'+k.id,{status:k.status==='active'?'inactive':'active'},p.token);await load()}
-  async function del(k){if(!confirm('删除?'))return;await api.del('/admin/api-keys/'+k.id,p.token);p.toast('已删除');await load()}
-  function cp(v){navigator.clipboard.writeText(v);p.toast('已复制','info')}
+  const l=ref([]),ld=ref(true),sa=ref(false),f=reactive({name:'',models:'',limit:null}),res=ref(''),saving=ref(false),copied=ref(false),busy=ref({});
+  function busyKey(id,k){return busy.value[id+'-'+k]}
+  async function withBusy(k,id,fn){busy.value={...busy.value,[id+'-'+k]:true};try{return await fn()}finally{const o={...busy.value};delete o[id+'-'+k];busy.value=o}}
+  async function load(){ld.value=true;try{l.value=await api.get('/admin/api-keys',p.token)}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
+  async function create(){if(saving.value)return;saving.value=true;try{const b={name:f.name};if(f.models)b.allowed_models=f.models.split(',').map(s=>s.trim()).filter(Boolean);if(f.limit)b.daily_limit=parseInt(f.limit);const r=await api.post('/admin/api-keys',b,p.token);res.value=r.key;p.toast('创建成功');await load()}catch(e){p.toast(apiErr(e,'创建失败'),'err')}saving.value=false}
+  async function toggle(k){await withBusy('toggle',k.id,async()=>{try{await api.put('/admin/api-keys/'+k.id,{status:k.status==='active'?'inactive':'active'},p.token);p.toast(k.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast(apiErr(e,'操作失败'),'err')}})}
+  async function del(k){if(!confirm('删除 API Key '+(k.name||k.key_prefix||k.id)+' ?'))return;await withBusy('del',k.id,async()=>{try{await api.del('/admin/api-keys/'+k.id,p.token);p.toast('已删除');await load()}catch(e){p.toast(apiErr(e,'删除失败'),'err')}})}
+  function cp(v){navigator.clipboard.writeText(v);copied.value=true;p.toast('已复制','info')}
   function close(){sa.value=false;res.value='';f.name='';f.models='';f.limit=null}
-  onMounted(load);return{l,ld,sa,f,res,load,create,toggle,del,cp,close,I}
+  onMounted(load);return{l,ld,sa,f,res,saving,copied,busyKey,load,create,toggle,del,cp,close,I}
 },template:`
 <div>
   <div class="phead"><h1>API Keys</h1><p>客户端访问密钥</p></div>
-  <div class="tbar"><button class="btn s pri" @click="sa=true"><span v-html="I.plus"></span>创建</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个</span></div>
+  <div class="tbar"><button class="btn s pri" @click="sa=true"><span v-html="I.plus"></span>创建</button><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
   <div class="card" v-else-if="l.length"><table><thead><tr><th>名称</th><th>Key</th><th>状态</th><th>模型</th><th>今日/日限额</th><th>请求</th><th>Token</th><th></th></tr></thead><tbody>
-    <tr v-for="k in l" :key="k.id"><td style="font-weight:600">{{k.name||'-'}}</td><td class="mono">{{k.key_prefix||'-'}}</td><td><span class="badge" :class="k.status">{{k.status}}</span></td><td>{{k.allowed_models?k.allowed_models.join(', '):'全部'}}</td><td>{{k.today_requests||0}} / {{k.daily_limit||'不限'}}</td><td>{{k.total_requests}}</td><td>{{k.total_tokens?.toLocaleString()}}</td><td><button class="btn s" @click="toggle(k)" style="margin-right:4px">{{k.status==='active'?'禁用':'启用'}}</button><button class="btn s danger" @click="del(k)">删除</button></td></tr>
+    <tr v-for="k in l" :key="k.id"><td style="font-weight:600">{{k.name||'-'}}</td><td class="mono">{{k.key_prefix||'-'}}</td><td><span class="badge" :class="k.status">{{k.status}}</span></td><td>{{k.allowed_models?k.allowed_models.join(', '):'全部'}}</td><td>{{k.today_requests||0}} / {{k.daily_limit||'不限'}}</td><td>{{k.total_requests}}</td><td>{{k.total_tokens?.toLocaleString()}}</td><td><button class="btn s" @click="toggle(k)" :disabled="busyKey(k.id,'toggle')" style="margin-right:4px">{{busyKey(k.id,'toggle')?'处理中':(k.status==='active'?'禁用':'启用')}}</button><button class="btn s danger" @click="del(k)" :disabled="busyKey(k.id,'del')">{{busyKey(k.id,'del')?'删除中':'删除'}}</button></td></tr>
   </tbody></table></div>
   <div class="card card-p empty" v-else><div class="em">🔑</div><p>暂无 Key</p></div>
-  <div class="ov" v-if="sa" @click.self="close"><div class="modal"><div class="modal-h"><h3>创建 Key</h3><button class="x" @click="close">&times;</button></div><div class="modal-b"><template v-if="res"><div class="field"><label>新 Key</label><div class="keybox">{{res}}</div><button class="btn s pri" style="margin-top:8px" @click="cp(res)">复制</button><div class="hint">只显示这一次，关闭后无法再次查看完整 Key。</div></div></template><template v-else><div class="field"><label>名称</label><input v-model="f.name" placeholder="OpenClaw"/></div><div class="field"><label>允许模型</label><input v-model="f.models" placeholder="auto,glm-5.2（留空=全部）"/></div><div class="field"><label>每日请求限额</label><input v-model="f.limit" type="number" placeholder="不限"/></div></template></div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res">创建</button></div></div></div>
+  <div class="ov" v-if="sa" @click.self="close"><div class="modal"><div class="modal-h"><h3>创建 Key</h3><button class="x" @click="close">&times;</button></div><div class="modal-b"><template v-if="res"><div class="field"><label>新 Key</label><div class="keybox">{{res}}</div><button class="btn s pri" style="margin-top:8px" @click="cp(res)">{{copied?'已复制':'复制'}}</button><div class="hint">只显示这一次，关闭后无法再次查看完整 Key。</div></div></template><template v-else><div class="field"><label>名称</label><input v-model="f.name" placeholder="OpenClaw"/></div><div class="field"><label>允许模型</label><input v-model="f.models" placeholder="auto,glm-5.2（留空=全部）"/></div><div class="field"><label>每日请求限额</label><input v-model="f.limit" type="number" placeholder="不限"/></div></template></div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res" :disabled="saving">{{saving?'创建中':'创建'}}</button></div></div></div>
 </div>`
 }).component('mdls',{props:['token','toast'],setup(p){
   const m=ref([]),al=ref({}),ld=ref(true);
@@ -537,30 +547,32 @@ createApp({
 <span class="k">Stream</span>:   建议开启</div></div>
 </div>`
 }).component('lgs',{props:['token'],setup(p){
-  const l=ref([]),ld=ref(true);
-  async function load(){ld.value=true;try{l.value=await api.get('/admin/logs?limit=100',p.token)}catch(e){}ld.value=false}
+  const l=ref([]),ld=ref(true),err=ref('');
+  async function load(){ld.value=true;err.value='';try{l.value=await api.get('/admin/logs?limit=100',p.token)}catch(e){err.value=apiErr(e,'日志加载失败')}ld.value=false}
   function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'-'}
-  onMounted(load);return{l,ld,load,fmt,I}
+  onMounted(load);return{l,ld,err,load,fmt,I}
 },template:`
 <div>
   <div class="phead"><h1>请求日志</h1><p>最近 100 条</p></div>
-  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
+  <div class="tbar"><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card card-p empty" v-else-if="err"><div class="em">!</div><p>{{err}}</p></div>
   <div class="card" v-else-if="l.length"><table><thead><tr><th>时间</th><th>Key</th><th>账号</th><th>模型</th><th>流</th><th>Token</th><th>Credit</th><th>耗时</th><th>状态</th></tr></thead><tbody>
     <tr v-for="x in l" :key="x.id"><td class="mono">{{fmt(x.created_at)}}</td><td>{{x.api_key_name||'-'}}</td><td>{{x.account_name||'-'}}</td><td><code>{{x.model}}</code></td><td>{{x.stream?'⚡':'—'}}</td><td>{{x.total_tokens}}</td><td>{{x.credit}}</td><td>{{x.duration_ms}}ms</td><td><span class="badge" :class="x.status_code===200?'ok':'err'">{{x.status_code}}</span></td></tr>
   </tbody></table></div>
   <div class="card card-p empty" v-else><div class="em">📋</div><p>暂无记录</p></div>
 </div>`
 }).component('stgs',{props:['token','toast'],setup(p){
-  const s=ref({});
-  async function load(){try{s.value=await api.get('/admin/settings',p.token)}catch(e){p.toast('失败','err')}}
-  async function save(){try{await api.put('/admin/settings',s.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
-  onMounted(load);return{s,load,save}
+  const s=ref({}),ld=ref(true),saving=ref(false);
+  async function load(){ld.value=true;try{s.value=await api.get('/admin/settings',p.token)}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
+  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',s.value,p.token);p.toast('已保存')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
+  onMounted(load);return{s,ld,saving,load,save,I}
 },template:`
 <div>
   <div class="phead"><h1>设置</h1><p>系统配置</p></div>
-  <div class="tbar"><button class="btn s pri" @click="save">保存</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
-  <div class="card card-p"><div style="font-weight:600;font-size:13px;margin-bottom:14px">系统设置</div>
+  <div class="tbar"><button class="btn s pri" @click="save" :disabled="saving||ld">{{saving?'保存中':'保存'}}</button><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button></div>
+  <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card card-p" v-else><div style="font-weight:600;font-size:13px;margin-bottom:14px">系统设置</div>
     <div class="field"><label>后端地址</label><input v-model="s.backend_url" placeholder="https://copilot.tencent.com"/></div>
     <div class="field"><label>默认域名</label><input v-model="s.default_domain" placeholder="www.codebuddy.cn"/></div>
     <div class="field"><label>超时（秒）</label><input v-model="s.timeout" type="number" placeholder="300"/></div>
