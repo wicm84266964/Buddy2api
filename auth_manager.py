@@ -293,6 +293,7 @@ def refresh_token(account: dict) -> bool:
 
         new_auth = data["data"]
         now_ms = int(time.time() * 1000)
+        next_status = "inactive" if account.get("status") == "inactive" else "active"
         update_data = {
             "access_token": new_auth.get("accessToken", ""),
             "refresh_token": new_auth.get("refreshToken", ""),
@@ -303,7 +304,7 @@ def refresh_token(account: dict) -> bool:
                 now_ms + new_auth.get("refreshExpiresIn", 0) * 1000
             ),
             "domain": new_auth.get("domain", DEFAULT_DOMAIN),
-            "status": "active",
+            "status": next_status,
         }
         db.update_account(aid, update_data)
         return True
@@ -356,14 +357,18 @@ def get_valid_headers(account: dict) -> Optional[dict]:
 # ============================================================
 
 def pick_account(exclude_ids: set[int] = None) -> Optional[dict]:
-    """选择一个可用账号（最少使用优先）。排除已尝试过的。"""
+    """选择一个可用账号。优先级越高越先用，同优先级按加权负载最低优先。"""
     exclude_ids = exclude_ids or set()
     accounts = db.get_active_accounts()
     candidates = [a for a in accounts if a["id"] not in exclude_ids]
     if not candidates:
         return None
-    # 按 total_requests 升序（最少使用优先）
-    candidates.sort(key=lambda a: a.get("total_requests", 0))
+    candidates.sort(key=lambda a: (
+        -int(a.get("priority") or 0),
+        (a.get("total_requests", 0) or 0) / max(1, int(a.get("weight") or 1)),
+        a.get("total_requests", 0) or 0,
+        a["id"],
+    ))
     return candidates[0]
 
 
@@ -373,10 +378,17 @@ def pick_account_with_fallback(exclude_ids: set[int] = None) -> Optional[dict]:
     if account:
         return account
 
-    # 尝试过期账号
+    # 尝试过期账号，但不碰 inactive/disabled 账号。
     conn = db.get_conn()
     rows = conn.execute(
-        "SELECT * FROM accounts WHERE status IN ('active', 'expired') ORDER BY total_requests ASC"
+        """
+        SELECT * FROM accounts
+        WHERE status='expired'
+        ORDER BY priority DESC,
+                 (CAST(total_requests AS REAL) / CASE WHEN weight > 0 THEN weight ELSE 1 END) ASC,
+                 total_requests ASC,
+                 id ASC
+        """
     ).fetchall()
     conn.close()
     for r in rows:
@@ -406,6 +418,8 @@ def get_account_status(account: dict) -> dict:
         "nickname": account.get("nickname", ""),
         "uid": account.get("uid", ""),
         "status": account.get("status", "unknown"),
+        "weight": int(account.get("weight") or 1),
+        "priority": int(account.get("priority") or 0),
         "token_expired": expired,
         "remaining_hours": remaining_hours,
         "total_requests": account.get("total_requests", 0),

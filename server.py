@@ -177,6 +177,8 @@ async def admin_list_accounts(authorization: str | None = Header(default=None)):
         s["account_type"] = a.get("account_type", "")
         s["enterprise_id"] = a.get("enterprise_id", "")
         s["domain"] = a.get("domain", "")
+        s["weight"] = int(a.get("weight") or 1)
+        s["priority"] = int(a.get("priority") or 0)
         result.append(s)
     return result
 
@@ -242,7 +244,11 @@ async def admin_update_account(
 ):
     _check_admin(authorization)
     data = await request.json()
-    db.update_account(aid, data)
+    allowed = {"name", "status", "weight", "priority"}
+    update_data = {k: data[k] for k in allowed if k in data}
+    if "status" in update_data and update_data["status"] not in {"active", "inactive", "expired"}:
+        raise HTTPException(status_code=400, detail="Invalid account status")
+    db.update_account(aid, update_data)
     return {"status": "ok"}
 
 
@@ -267,6 +273,25 @@ async def admin_refresh_account(
         raise HTTPException(status_code=404, detail="Account not found")
     ok = auth_manager.refresh_token(account)
     return {"status": "ok" if ok else "failed"}
+
+
+@app.post("/admin/accounts/{aid}/test")
+async def admin_test_account(
+    aid: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    account = db.get_account(aid)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    model = data.get("model") if isinstance(data, dict) else None
+    prompt = data.get("prompt") if isinstance(data, dict) else None
+    return await proxy.test_account_chat(account, model or "auto", prompt or "ping")
 
 
 # --- API Keys ---

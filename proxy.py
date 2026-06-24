@@ -183,6 +183,53 @@ async def proxy_chat_completions(
     return ("error", (503, {"error": {"message": "All accounts failed", "type": "server_error"}}))
 
 
+async def test_account_chat(account: dict, model: str = "auto", prompt: str = "ping") -> dict:
+    """Run a small non-streaming request against one specific account."""
+    headers = auth_manager.get_valid_headers(account)
+    if not headers:
+        return {
+            "ok": False,
+            "status_code": 401,
+            "duration_ms": 0,
+            "message": "token refresh failed or account credentials are invalid",
+        }
+
+    body = build_backend_body({
+        "model": model or "auto",
+        "messages": [{"role": "user", "content": prompt or "ping"}],
+        "stream": False,
+    })
+    url = f"{BACKEND}/v2/chat/completions"
+    t0 = time.time()
+    result = await _collect_stream(url, headers, body, account, None, f"account-test:{model or 'auto'}", t0)
+    duration_ms = int((time.time() - t0) * 1000)
+
+    if result[0] == "json":
+        data = result[1]
+        message = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+        usage = data.get("usage") or {}
+        return {
+            "ok": True,
+            "status_code": 200,
+            "duration_ms": duration_ms,
+            "model": data.get("model"),
+            "message": message[:240],
+            "usage": usage,
+        }
+
+    status, detail = result[1]
+    msg = detail
+    if isinstance(detail, dict):
+        err = detail.get("error") if isinstance(detail.get("error"), dict) else detail
+        msg = err.get("message") if isinstance(err, dict) else detail
+    return {
+        "ok": False,
+        "status_code": status,
+        "duration_ms": duration_ms,
+        "message": str(msg)[:500],
+    }
+
+
 async def _stream_upstream(
     url: str, headers: dict, body: dict,
     account: dict, api_key_info: Optional[dict],
