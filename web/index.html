@@ -226,11 +226,12 @@ const I={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
 };
 const api={
-  async get(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{headers:h});if(!r.ok)throw new Error(r.status);return r.json()},
-  async post(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'POST',headers:h,body:JSON.stringify(b)});if(!r.ok)throw new Error(r.status);return r.json()},
-  async put(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'PUT',headers:h,body:JSON.stringify(b)});if(!r.ok)throw new Error(r.status);return r.json()},
-  async del(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'DELETE',headers:h});if(!r.ok)throw new Error(r.status);return r.json()},
+  async get(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{headers:h,credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
+  async post(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'POST',headers:h,body:JSON.stringify(b),credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
+  async put(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'PUT',headers:h,body:JSON.stringify(b),credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
+  async del(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'DELETE',headers:h,credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
 };
+function apiErr(e,fallback='加载失败'){return e.message==='401'?'本机管理凭证无效，请刷新页面；远程访问时再使用左下角备用 Token。':fallback}
 createApp({
   setup(){
     const page=ref('dashboard'),token=ref(localStorage.getItem('cb_gw_token')||''),ti=ref(''),st=ref(false),toast=ref(null);
@@ -257,7 +258,7 @@ createApp({
           <div v-for="n in nav.slice(5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
         </div>
       </div>
-      <div class="side-foot"><a @click="st=true;ti=token"><span class="dot" :class="{off:!token}"></span>{{token?'已验证':'设置 Token'}}</a></div>
+      <div class="side-foot"><a @click="st=true;ti=token"><span class="dot"></span>{{token?'备用 Token 已设':'本机自动验证'}}</a></div>
     </div>
     <div class="main">
       <div class="content" v-if="page==='dashboard'"><dash :token="token" :toast="tf"/></div>
@@ -267,7 +268,7 @@ createApp({
       <div class="content" v-if="page==='logs'"><lgs :token="token"/></div>
       <div class="content" v-if="page==='settings'"><stgs :token="token" :toast="tf"/></div>
     </div>
-    <div class="ov" v-if="st" @click.self="st=false"><div class="modal"><div class="modal-h"><h3>Admin Token</h3><button class="x" @click="st=false">&times;</button></div><div class="modal-b"><div class="field"><label>Token</label><input v-model="ti" type="password" placeholder="控制台启动日志或 --admin-token"/><div class="hint">默认启动会生成临时 Token；重启后会变化。</div></div></div><div class="modal-f"><button class="btn" @click="st=false">取消</button><button class="btn pri" @click="sv">保存</button></div></div></div>
+    <div class="ov" v-if="st" @click.self="st=false"><div class="modal"><div class="modal-h"><h3>备用 Admin Token</h3><button class="x" @click="st=false">&times;</button></div><div class="modal-b"><div class="field"><label>Token</label><input v-model="ti" type="password" placeholder="远程访问或 Cookie 失效时才需要"/><div class="hint">本机打开 127.0.0.1:8787 会自动验证，通常不用填写。</div></div></div><div class="modal-f"><button class="btn" @click="st=false">取消</button><button class="btn pri" @click="sv">保存</button></div></div></div>
     <div class="toasts"><div class="toast" :class="toast?.t" v-if="toast">{{toast.m}}</div></div>
   </div>`
 }).component('dash',{props:['token','toast'],setup(p){
@@ -390,15 +391,15 @@ createApp({
 </div>`
 }).component('accs',{props:['token','toast'],setup(p){
   const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref(''),disc=ref(null),dl=ref(false),authPath=ref(''),test=ref(null),tl=ref(0);
-  async function load(){ld.value=true;try{l.value=(await api.get('/admin/accounts',p.token)).map(a=>({...a,_weight:a.weight||1,_priority:a.priority||0}))}catch(e){p.toast('加载失败','err')}ld.value=false}
-  async function discover(path=''){dl.value=true;try{const q=path&&path.trim()?('?auth_dir='+encodeURIComponent(path.trim())):'';disc.value=await api.get('/admin/accounts/discover'+q,p.token)}catch(e){p.toast('检测失败','err')}dl.value=false}
-  async function scan(path=''){try{const body=path&&path.trim()?{auth_dir:path.trim()}:{};const r=await api.post('/admin/accounts/scan',body,p.token);p.toast('导入 '+r.imported+' · 更新 '+r.updated+' · 跳过 '+r.skipped);await load();await discover(path)}catch(e){p.toast('扫描失败','err')}}
+  async function load(){ld.value=true;try{l.value=(await api.get('/admin/accounts',p.token)).map(a=>({...a,_weight:a.weight||1,_priority:a.priority||0}))}catch(e){p.toast(apiErr(e),'err')}ld.value=false}
+  async function discover(path=''){dl.value=true;try{const q=path&&path.trim()?('?auth_dir='+encodeURIComponent(path.trim())):'';disc.value=await api.get('/admin/accounts/discover'+q,p.token)}catch(e){p.toast(apiErr(e,'检测失败'),'err')}dl.value=false}
+  async function scan(path=''){try{const body=path&&path.trim()?{auth_dir:path.trim()}:{};const r=await api.post('/admin/accounts/scan',body,p.token);p.toast('导入 '+r.imported+' · 更新 '+r.updated+' · 跳过 '+r.skipped);await load();await discover(path)}catch(e){p.toast(apiErr(e,'扫描失败'),'err')}}
   async function scanCustom(){const path=authPath.value.trim();if(!path){p.toast('请先填写目录或 .info 文件路径','err');return}await scan(path)}
   async function add(){try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load();await discover(authPath.value)}catch(e){p.toast('失败:'+e.message,'err')}}
   async function ref2(id){try{await api.post('/admin/accounts/'+id+'/refresh',{},p.token);p.toast('刷新成功');await load()}catch(e){p.toast('失败','err')}}
-  async function saveMeta(a){try{await api.put('/admin/accounts/'+a.id,{weight:parseInt(a._weight)||1,priority:parseInt(a._priority)||0},p.token);p.toast('已保存');await load()}catch(e){p.toast('保存失败','err')}}
-  async function toggle(a){try{await api.put('/admin/accounts/'+a.id,{status:a.status==='active'?'inactive':'active'},p.token);p.toast(a.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast('操作失败','err')}}
-  async function testOne(a){tl.value=a.id;test.value=null;try{const r=await api.post('/admin/accounts/'+a.id+'/test',{model:'auto',prompt:'ping'},p.token);test.value={account:a.nickname||a.name,result:r};p.toast(r.ok?'测试成功':'测试失败',r.ok?'ok':'err');await load()}catch(e){p.toast('测试失败','err');test.value={account:a.nickname||a.name,result:{ok:false,status_code:0,message:e.message}}}tl.value=0}
+  async function saveMeta(a){try{await api.put('/admin/accounts/'+a.id,{weight:parseInt(a._weight)||1,priority:parseInt(a._priority)||0},p.token);p.toast('已保存');await load()}catch(e){p.toast(apiErr(e,'保存失败'),'err')}}
+  async function toggle(a){try{await api.put('/admin/accounts/'+a.id,{status:a.status==='active'?'inactive':'active'},p.token);p.toast(a.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast(apiErr(e,'操作失败'),'err')}}
+  async function testOne(a){tl.value=a.id;test.value=null;try{const r=await api.post('/admin/accounts/'+a.id+'/test',{model:'auto',prompt:'ping'},p.token);test.value={account:a.nickname||a.name,result:r};p.toast(r.ok?'测试成功':'测试失败',r.ok?'ok':'err');await load()}catch(e){p.toast(apiErr(e,'测试失败'),'err');test.value={account:a.nickname||a.name,result:{ok:false,status_code:0,message:e.message}}}tl.value=0}
   async function del(id){if(!confirm('删除?'))return;await api.del('/admin/accounts/'+id,p.token);p.toast('已删除');await load();await discover(authPath.value)}
   function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}
   function size(v){v=Number(v||0);if(v>=1024*1024)return(v/1024/1024).toFixed(1)+' MB';if(v>=1024)return(v/1024).toFixed(1)+' KB';return v+' B'}

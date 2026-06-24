@@ -10,6 +10,7 @@ FastAPI 应用，包含：
 """
 
 import argparse
+import contextvars
 import os
 import secrets
 import sys
@@ -42,16 +43,32 @@ WEB_DIR = Path(__file__).parent / "web"
 
 ADMIN_TOKEN: str = ""
 ALLOW_NO_ADMIN_AUTH = False
+ADMIN_COOKIE_NAME = "cb_gw_admin_token"
+_CURRENT_REQUEST: contextvars.ContextVar[Request | None] = contextvars.ContextVar("current_request", default=None)
+
+
+@app.middleware("http")
+async def _request_context(request: Request, call_next):
+    token = _CURRENT_REQUEST.set(request)
+    try:
+        return await call_next(request)
+    finally:
+        _CURRENT_REQUEST.reset(token)
 
 
 def _check_admin(authorization: str | None):
     if ALLOW_NO_ADMIN_AUTH:
         return
-    token = ""
+    candidates = []
     if authorization:
         parts = authorization.split(" ", 1)
-        token = parts[1] if len(parts) == 2 else parts[0]
-    if not token or token != ADMIN_TOKEN:
+        candidates.append(parts[1] if len(parts) == 2 else parts[0])
+
+    request = _CURRENT_REQUEST.get()
+    if request:
+        candidates.append(request.cookies.get(ADMIN_COOKIE_NAME, ""))
+
+    if not any(t and secrets.compare_digest(t, ADMIN_TOKEN) for t in candidates):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
@@ -418,7 +435,16 @@ async def admin_update_aliases(
 
 @app.get("/")
 async def index():
-    return FileResponse(str(WEB_DIR / "index.html"))
+    response = FileResponse(str(WEB_DIR / "index.html"))
+    if ADMIN_TOKEN and not ALLOW_NO_ADMIN_AUTH:
+        response.set_cookie(
+            ADMIN_COOKIE_NAME,
+            ADMIN_TOKEN,
+            httponly=True,
+            samesite="lax",
+            max_age=30 * 24 * 3600,
+        )
+    return response
 
 
 # ============================================================
