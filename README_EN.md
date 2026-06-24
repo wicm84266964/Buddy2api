@@ -4,7 +4,7 @@
 
 ## What is this?
 
-If you're using a popular VS Code AI coding extension that comes with built-in model credits (you know the one — made by a major Chinese tech company), you've probably noticed those credits are locked inside the extension. Buddy 2 API "frees" those credits into a standard OpenAI API, so you can use them in OpenClaw, Cherry Studio, NextChat, or any OpenAI-compatible client.
+If you're using Tencent's "Claw" AI coding extension, you've probably noticed its built-in model credits are locked inside the extension. Buddy 2 API "frees" those credits into a standard OpenAI API, so you can use them in OpenClaw, Cherry Studio, NextChat, or any OpenAI-compatible client.
 
 ## Features
 

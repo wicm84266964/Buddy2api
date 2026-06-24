@@ -6,7 +6,7 @@
 
 ## 这是什么？
 
-如果你正在使用某款自带模型额度的 VS Code AI 编程插件（比如腾讯出品的那款），你会发现它的额度只能在插件内使用。Buddy 2 API 帮你把这些额度"解放"出来，变成标准的 OpenAI API 接口，这样你就可以在 OpenClaw、Cherry Studio、NextChat 等任意客户端中使用。
+如果你正在用腾讯那只"龙虾"（Claw）的 AI 编程插件，你会发现它自带的模型额度只能在插件内使用。Buddy 2 API 帮你把这些额度"解放"出来，变成标准的 OpenAI API 接口，这样你就可以在 OpenClaw、Cherry Studio、NextChat 等任意客户端中使用。
 
 ## 功能
 
