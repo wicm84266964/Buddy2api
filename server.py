@@ -132,11 +132,12 @@ async def chat_completions(
     if not messages:
         raise HTTPException(status_code=400, detail={"error": {"message": "messages is required", "type": "invalid_request_error"}})
 
-    # 检查 API Key 模型权限
+    # 检查 API Key 模型权限（同时匹配别名和真实模型 ID）
     if api_key_info and api_key_info.get("allowed_models"):
-        model = payload.get("model", "auto")
-        if model not in api_key_info["allowed_models"]:
-            raise HTTPException(status_code=403, detail={"error": {"message": f"Model '{model}' not allowed for this API key", "type": "invalid_request_error"}})
+        raw_model = payload.get("model", "auto")
+        resolved_model = proxy.resolve_model_alias(raw_model)
+        if raw_model not in api_key_info["allowed_models"] and resolved_model not in api_key_info["allowed_models"]:
+            raise HTTPException(status_code=403, detail={"error": {"message": f"Model '{raw_model}' not allowed for this API key", "type": "invalid_request_error"}})
 
     result = await proxy.proxy_chat_completions(payload, api_key_info)
 

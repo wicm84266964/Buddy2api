@@ -275,12 +275,21 @@ createApp({
 </div>`
 }).component('mdls',{props:['token','toast'],setup(p){
   const m=ref([]),al=ref({}),ld=ref(true);
+  const BUILTIN=['gpt-4o','gpt-4o-mini','gpt-4-turbo','gpt-4','gpt-3.5-turbo','claude-3.5-sonnet','claude-3-haiku','deepseek-chat','deepseek-coder','moonshot-v1-128k','moonshot-v1-32k'];
+  const newKey=ref(''),newVal=ref('');
   async function load(){ld.value=true;try{m.value=await api.get('/admin/models',p.token);al.value=await api.get('/admin/aliases',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
   async function save(){try{await api.put('/admin/models',m.value,p.token);await api.put('/admin/aliases',al.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
   function add(){m.value.push({id:'',name:''})}function rm(i){m.value.splice(i,1)}
-  function addAlias(){al.value['']= ''; al.value = {...al.value}} 
+  function isBuiltin(k){return BUILTIN.includes(k)}
+  function addAlias(){
+    const k=newKey.value.trim(),v=newVal.value.trim();
+    if(!k||!v){p.toast('请输入别名和目标模型','err');return}
+    if(isBuiltin(k)){p.toast('不能覆盖内置别名','err');return}
+    if(al.value[k]){p.toast('别名已存在','err');return}
+    al.value={...al.value,[k]:v};newKey.value='';newVal.value='';p.toast('已添加')
+  }
   function rmAlias(k){const o={...al.value};delete o[k];al.value=o}
-  onMounted(load);return{m,al,ld,load,save,add,rm,addAlias,rmAlias,I}
+  onMounted(load);return{m,al,ld,load,save,add,rm,newKey,newVal,addAlias,rmAlias,isBuiltin,I}
 },template:`
 <div>
   <div class="phead"><h1>模型配置</h1><p>/v1/models 列表 &amp; 别名映射</p></div>
@@ -293,13 +302,19 @@ createApp({
     <tr v-if="!m.length"><td colspan="3" class="empty">暂无模型</td></tr>
     </tbody></table>
   </div>
-  <div class="card"><div class="card-h">别名映射<span class="sub">客户端名称 → 后端模型</span><button class="btn s" @click="addAlias" style="margin-left:8px"><span v-html="I.plus"></span>添加</button></div>
+  <div class="card"><div class="card-h">别名映射<span class="sub">客户端名称 → 后端模型</span></div>
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border2);display:flex;gap:8px;align-items:center">
+      <input v-model="newKey" placeholder="别名 (如 gpt-4o)" style="flex:1;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px;font-family:var(--mono)"/>
+      <span style="color:var(--fg3)">→</span>
+      <input v-model="newVal" placeholder="后端模型 (如 glm-5.2)" style="flex:1;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px;font-family:var(--mono)"/>
+      <button class="btn s pri" @click="addAlias"><span v-html="I.plus"></span>添加</button>
+    </div>
     <table><thead><tr><th>别名（客户端用）</th><th>→ 后端模型 ID</th><th></th></tr></thead><tbody>
-    <tr v-for="(v,k) in al" :key="k"><td class="mono" style="font-weight:600">{{k}}</td><td class="mono">{{v}}</td><td><button class="btn s danger" @click="rmAlias(k)">删除</button></td></tr>
+    <tr v-for="(v,k) in al" :key="k"><td class="mono" style="font-weight:600">{{k}} <span v-if="isBuiltin(k)" class="tag" style="margin-left:6px">内置</span></td><td class="mono">{{v}}</td><td><button v-if="!isBuiltin(k)" class="btn s danger" @click="rmAlias(k)">删除</button></td></tr>
     <tr v-if="!Object.keys(al).length"><td colspan="3" class="empty">暂无自定义别名</td></tr>
     </tbody></table>
     <div style="padding:12px 16px;font-size:12px;color:var(--fg3);border-top:1px solid var(--border2)">
-      内置别名：gpt-4o→glm-5.2, gpt-4o-mini→glm-5.1, claude-3.5-sonnet→deepseek-v4-pro, deepseek-chat→deepseek-v4-pro, moonshot-v1-128k→kimi-k2.7
+      内置别名（不可修改）：gpt-4o→glm-5.2, gpt-4o-mini→glm-5.1, claude-3.5-sonnet→deepseek-v4-pro, deepseek-chat→deepseek-v4-pro, moonshot-v1-128k→kimi-k2.7
     </div>
   </div>
   </template>
