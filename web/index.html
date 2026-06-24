@@ -11,6 +11,7 @@
   --border:#e8e8e8;--border2:#f0f0f0;
   --hover:#f7f7f7;--input:#fafafa;
   --blue:#0066ff;--blue-bg:#f0f5ff;
+  --blue-soft:#f7faff;--blue-border:#dbe8ff;
   --green:#00994d;--green-bg:#f0f9f4;
   --red:#e03030;--red-bg:#fef2f2;
   --r:6px;
@@ -58,8 +59,8 @@ code{font-family:var(--mono);font-size:12px}
 btn,.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);font:inherit;font-size:13px;color:var(--fg);cursor:pointer;transition:all .1s;white-space:nowrap}
 .btn:hover{background:var(--hover);border-color:var(--fg3)}
 .btn.s{padding:4px 8px;font-size:12px}
-.btn.pri{background:var(--fg);color:#fff;border-color:var(--fg)}
-.btn.pri:hover{background:#000}
+.btn.pri{background:var(--blue-bg);color:var(--blue);border-color:var(--blue-border);font-weight:600}
+.btn.pri:hover{background:#e7f0ff;border-color:#bcd4ff}
 .btn.danger{color:var(--red);border-color:#f0d0d0}
 .btn.danger:hover{background:var(--red-bg);border-color:var(--red)}
 .btn svg{width:14px;height:14px}
@@ -117,7 +118,7 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .metric .m-value{font-size:18px;font-weight:700;margin-top:5px}
 .metric .m-sub{font-size:11px;color:var(--fg3);margin-top:3px}
 .progress{height:5px;border-radius:999px;background:var(--border2);overflow:hidden}
-.progress span{display:block;height:100%;background:var(--fg);border-radius:999px}
+.progress span{display:block;height:100%;background:var(--blue);border-radius:999px}
 .progress.ok span{background:var(--green)}.progress.err span{background:var(--red)}
 .rank-list{display:flex;flex-direction:column;gap:12px}
 .rank-item{display:grid;grid-template-columns:minmax(100px,1fr) 64px;gap:10px;align-items:center}
@@ -184,10 +185,10 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .bars{display:flex;align-items:flex-end;gap:8px;height:120px}
 .bcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
 .bwrap{width:100%;height:90px;display:flex;align-items:flex-end;justify-content:center}
-.bar{width:60%;min-height:2px;border-radius:3px 3px 0 0;background:var(--fg);transition:height .3s;position:relative;cursor:pointer}
+.bar{width:60%;min-height:2px;border-radius:3px 3px 0 0;background:#bcd4ff;transition:height .3s;position:relative;cursor:pointer}
 .bar:hover{background:var(--blue)}
 .bar:hover .btip{opacity:1}
-.btip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;white-space:nowrap;opacity:0;transition:opacity .1s;pointer-events:none}
+.btip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#fff;color:var(--fg);border:1px solid var(--border);box-shadow:0 4px 14px rgba(0,0,0,.08);padding:2px 8px;border-radius:3px;font-size:10px;white-space:nowrap;opacity:0;transition:opacity .1s;pointer-events:none}
 .blabel{font-size:10px;color:var(--fg3)}
 
 /* misc */
@@ -196,8 +197,8 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .load{text-align:center;padding:48px}
 .empty{text-align:center;padding:40px;color:var(--fg3)}
 .empty .em{font-size:28px;margin-bottom:8px;opacity:.3}
-.codeblk{background:#1a1a2e;color:#d4d4d4;padding:14px;border-radius:4px;font-family:var(--mono);font-size:12px;line-height:1.7;overflow-x:auto}
-.codeblk .k{color:#6cb6ff}.codeblk .s{color:#f0c674}
+.codeblk{background:var(--blue-soft);color:var(--fg2);border:1px solid var(--blue-border);padding:14px;border-radius:4px;font-family:var(--mono);font-size:12px;line-height:1.7;overflow-x:auto}
+.codeblk .k{color:var(--blue);font-weight:600}.codeblk .s{color:#7a5a00}
 .keybox{font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border);padding:8px 12px;border-radius:4px;word-break:break-all;user-select:all}
 .tag{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11px;background:var(--hover);color:var(--fg2)}
 @media (max-width:900px){
