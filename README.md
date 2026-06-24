@@ -1,4 +1,4 @@
-# Work Buddy 2 API
+# Buddy2api
 
 [English](README_EN.md) | 中文
 
