@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeBuddy Gateway</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#fff;--fg:#1a1a1a;--fg2:#666;--fg3:#999;
+  --border:#e8e8e8;--border2:#f0f0f0;
+  --hover:#f7f7f7;--input:#fafafa;
+  --blue:#0066ff;--blue-bg:#f0f5ff;
+  --green:#00994d;--green-bg:#f0f9f4;
+  --red:#e03030;--red-bg:#fef2f2;
+  --r:6px;
+  --mono:'SF Mono','Fira Code',Consolas,'Courier New',monospace;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Noto Sans SC',sans-serif;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--fg);font-size:14px;-webkit-font-smoothing:antialiased}
+a{color:var(--blue);text-decoration:none}
+code{font-family:var(--mono);font-size:12px}
+
+/* layout */
+.layout{display:flex;min-height:100vh}
+.side{width:220px;border-right:1px solid var(--border);position:fixed;height:100vh;display:flex;flex-direction:column;background:var(--bg)}
+.main{flex:1;margin-left:220px}
+.content{padding:24px 32px;max-width:1000px}
+
+/* sidebar */
+.side-brand{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.side-brand .mark{font-weight:700;font-size:14px;letter-spacing:-.3px}
+.side-brand .ver{font-size:11px;color:var(--fg3);margin-left:auto;font-family:var(--mono)}
+.side-nav{flex:1;padding:8px 0;overflow-y:auto}
+.side-nav::-webkit-scrollbar{width:0}
+.nav-grp{padding:4px 0}
+.nav-grp-label{font-size:10px;color:var(--fg3);padding:10px 20px 4px;font-weight:500}
+.nav-item{display:flex;align-items:center;gap:8px;padding:7px 20px;font-size:13px;color:var(--fg2);cursor:pointer;border-left:2px solid transparent;transition:all .1s}
+.nav-item:hover{background:var(--hover);color:var(--fg)}
+.nav-item.on{color:var(--fg);font-weight:600;background:var(--hover);border-left-color:var(--fg)}
+.nav-item svg{width:15px;height:15px;opacity:.6}
+.nav-item.on svg{opacity:1}
+.side-foot{padding:12px 20px;border-top:1px solid var(--border);font-size:12px;color:var(--fg3)}
+.side-foot a{cursor:pointer}
+.side-foot .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:6px}
+.side-foot .dot.off{background:var(--fg3)}
+
+/* page head */
+.phead{margin-bottom:20px}
+.phead h1{font-size:18px;font-weight:700}
+.phead p{font-size:12px;color:var(--fg2);margin-top:2px}
+
+/* toolbar */
+.tbar{display:flex;align-items:center;gap:8px;margin-bottom:16px}
+.spacer{flex:1}
+
+/* buttons */
+btn,.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg);font:inherit;font-size:13px;color:var(--fg);cursor:pointer;transition:all .1s;white-space:nowrap}
+.btn:hover{background:var(--hover);border-color:var(--fg3)}
+.btn.s{padding:4px 8px;font-size:12px}
+.btn.pri{background:var(--fg);color:#fff;border-color:var(--fg)}
+.btn.pri:hover{background:#000}
+.btn.danger{color:var(--red);border-color:#f0d0d0}
+.btn.danger:hover{background:var(--red-bg);border-color:var(--red)}
+.btn svg{width:14px;height:14px}
+
+/* card */
+.card{border:1px solid var(--border);border-radius:var(--r);margin-bottom:16px}
+.card-h{padding:12px 16px;border-bottom:1px solid var(--border2);font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:space-between}
+.card-h .sub{font-weight:400;color:var(--fg3);font-size:12px}
+.card-p{padding:16px}
+
+/* table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 16px;font-size:11px;font-weight:600;color:var(--fg3);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+td{padding:10px 16px;border-bottom:1px solid var(--border2)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--hover)}
+.mono{font-family:var(--mono);font-size:12px;color:var(--fg2)}
+
+/* badge */
+badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge::before{content:'';width:5px;height:5px;border-radius:50%}
+.badge.active{background:var(--green-bg);color:var(--green)}.badge.active::before{background:var(--green)}
+.badge.expired{background:var(--red-bg);color:var(--red)}.badge.expired::before{background:var(--red)}
+.badge.inactive{background:#f5f5f5;color:var(--fg3)}.badge.inactive::before{background:var(--fg3)}
+.badge.ok{background:var(--green-bg);color:var(--green)}.badge.ok::before{background:var(--green)}
+.badge.err{background:var(--red-bg);color:var(--red)}.badge.err::before{background:var(--red)}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat{border:1px solid var(--border);border-radius:var(--r);padding:16px}
+.stat .sl{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px}
+.stat .sv{font-size:22px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
+.stat .ss{font-size:11px;color:var(--fg3);margin-top:2px}
+
+/* modal */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:1000;display:flex;align-items:center;justify-content:center}
+.modal{background:#fff;border-radius:var(--r);width:460px;max-width:92vw;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;border:1px solid var(--border)}
+.modal-h{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-h h3{font-size:15px;font-weight:700}
+.modal-h .x{border:none;background:none;font-size:20px;cursor:pointer;color:var(--fg3);padding:0 4px;line-height:1}
+.modal-h .x:hover{color:var(--fg)}
+.modal-b{padding:16px;overflow-y:auto;flex:1}
+.modal-f{padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+
+/* form */
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;font-weight:600;margin-bottom:4px}
+.field input,.field textarea,.field select{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:4px;font:inherit;font-size:13px;outline:none;background:var(--input);transition:border .1s}
+.field input:focus,.field textarea:focus{border-color:var(--blue);background:#fff}
+.field textarea{font-family:var(--mono);resize:vertical;min-height:120px;font-size:12px;line-height:1.5}
+.field .hint{font-size:11px;color:var(--fg3);margin-top:3px}
+
+/* toast */
+.toasts{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:6px}
+.toast{padding:8px 14px;border-radius:4px;font-size:13px;color:#fff;animation:tin .2s}
+@keyframes tin{from{transform:translateX(120%)}to{transform:translateX(0)}}
+.toast.ok{background:var(--green)}.toast.err{background:var(--red)}.toast.info{background:var(--blue)}
+
+/* chart */
+.chart-box{padding:16px}
+.bars{display:flex;align-items:flex-end;gap:8px;height:120px}
+.bcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.bwrap{width:100%;height:90px;display:flex;align-items:flex-end;justify-content:center}
+.bar{width:60%;min-height:2px;border-radius:3px 3px 0 0;background:var(--fg);transition:height .3s;position:relative;cursor:pointer}
+.bar:hover{background:var(--blue)}
+.bar:hover .btip{opacity:1}
+.btip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--fg);color:#fff;padding:2px 8px;border-radius:3px;font-size:10px;white-space:nowrap;opacity:0;transition:opacity .1s;pointer-events:none}
+.blabel{font-size:10px;color:var(--fg3)}
+
+/* misc */
+.spin{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--fg);border-radius:50%;animation:sp .6s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.load{text-align:center;padding:48px}
+.empty{text-align:center;padding:40px;color:var(--fg3)}
+.empty .em{font-size:28px;margin-bottom:8px;opacity:.3}
+.codeblk{background:#1a1a2e;color:#d4d4d4;padding:14px;border-radius:4px;font-family:var(--mono);font-size:12px;line-height:1.7;overflow-x:auto}
+.codeblk .k{color:#6cb6ff}.codeblk .s{color:#f0c674}
+.keybox{font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border);padding:8px 12px;border-radius:4px;word-break:break-all;user-select:all}
+.tag{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11px;background:var(--hover);color:var(--fg2)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.global.prod.min.js"></script>
+<script>
+const{createApp,ref,reactive,computed,onMounted}=Vue;
+const I={
+  dash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>',
+  users:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
+  cpu:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
+  log:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  gear:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  scan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>',
+  refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+};
+const api={
+  async get(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{headers:h});if(!r.ok)throw new Error(r.status);return r.json()},
+  async post(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'POST',headers:h,body:JSON.stringify(b)});if(!r.ok)throw new Error(r.status);return r.json()},
+  async put(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'PUT',headers:h,body:JSON.stringify(b)});if(!r.ok)throw new Error(r.status);return r.json()},
+  async del(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'DELETE',headers:h});if(!r.ok)throw new Error(r.status);return r.json()},
+};
+createApp({
+  setup(){
+    const page=ref('dashboard'),token=ref(localStorage.getItem('cb_gw_token')||''),ti=ref(''),st=ref(false),toast=ref(null);
+    function tf(m,t='ok'){toast.value={m,t};setTimeout(()=>toast.value=null,2500)}
+    function sv(){token.value=ti.value;localStorage.setItem('cb_gw_token',ti.value);st.value=false;ti.value='';tf('已保存')}
+    const nav=[{k:'dashboard',l:'Dashboard',i:I.dash},{k:'accounts',l:'账号管理',i:I.users},{k:'keys',l:'API Keys',i:I.key},{k:'models',l:'模型配置',i:I.cpu},{k:'logs',l:'请求日志',i:I.log},{k:'settings',l:'设置',i:I.gear}];
+    return{page,token,ti,st,toast,tf,sv,nav,I}
+  },
+  template:`
+  <div class="layout">
+    <div class="side">
+      <div class="side-brand"><span class="mark">CodeBuddy Gateway</span><span class="ver">v1.0</span></div>
+      <div class="side-nav">
+        <div class="nav-grp">
+          <div class="nav-grp-label">概览</div>
+          <div v-for="n in nav.slice(0,1)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
+        </div>
+        <div class="nav-grp">
+          <div class="nav-grp-label">管理</div>
+          <div v-for="n in nav.slice(1,5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
+        </div>
+        <div class="nav-grp">
+          <div class="nav-grp-label">系统</div>
+          <div v-for="n in nav.slice(5)" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="page=n.k" v-html="n.i+'<span>'+n.l+'</span>'"></div>
+        </div>
+      </div>
+      <div class="side-foot"><a @click="st=true;ti=token"><span class="dot" :class="{off:!token}"></span>{{token?'已验证':'设置 Token'}}</a></div>
+    </div>
+    <div class="main">
+      <div class="content" v-if="page==='dashboard'"><dash :token="token" :toast="tf"/></div>
+      <div class="content" v-if="page==='accounts'"><accs :token="token" :toast="tf"/></div>
+      <div class="content" v-if="page==='keys'"><keys :token="token" :toast="tf"/></div>
+      <div class="content" v-if="page==='models'"><mdls :token="token" :toast="tf"/></div>
+      <div class="content" v-if="page==='logs'"><lgs :token="token"/></div>
+      <div class="content" v-if="page==='settings'"><stgs :token="token" :toast="tf"/></div>
+    </div>
+    <div class="ov" v-if="st" @click.self="st=false"><div class="modal"><div class="modal-h"><h3>Admin Token</h3><button class="x" @click="st=false">&times;</button></div><div class="modal-b"><div class="field"><label>Token</label><input v-model="ti" type="password" placeholder="控制台启动日志或 --admin-token"/><div class="hint">默认启动会生成临时 Token；重启后会变化。</div></div></div><div class="modal-f"><button class="btn" @click="st=false">取消</button><button class="btn pri" @click="sv">保存</button></div></div></div>
+    <div class="toasts"><div class="toast" :class="toast?.t" v-if="toast">{{toast.m}}</div></div>
+  </div>`
+}).component('dash',{props:['token','toast'],setup(p){
+  const s=ref(null),ld=ref(true);
+  async function load(){ld.value=true;try{s.value=await api.get('/admin/stats',p.token)}catch(e){p.toast('加载失败','err')}ld.value=false}
+  onMounted(load);const mx=computed(()=>s.value?.daily?.length?Math.max(...s.value.daily.map(d=>d.requests),1):1);
+  return{s,ld,load,mx}
+},template:`
+<div>
+  <div class="phead"><h1>Dashboard</h1><p>系统概览</p></div>
+  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div></div>
+  <div v-if="ld" class="load"><div class="spin"></div></div>
+  <template v-else-if="s">
+    <div class="stats">
+      <div class="stat"><div class="sl">总请求</div><div class="sv">{{s.total_requests}}</div><div class="ss">all time</div></div>
+      <div class="stat"><div class="sl">Token 消耗</div><div class="sv">{{s.total_tokens.toLocaleString()}}</div><div class="ss">prompt+completion</div></div>
+      <div class="stat"><div class="sl">Credit</div><div class="sv">{{s.total_credit}}</div><div class="ss">腾讯计费单位</div></div>
+      <div class="stat"><div class="sl">活跃</div><div class="sv">{{s.active_accounts}}<span style="font-size:13px;color:#999;font-weight:400">/{{s.active_keys}}</span></div><div class="ss">账号 / Keys</div></div>
+    </div>
+    <div class="card" v-if="s.daily?.length">
+      <div class="card-h">7 天趋势<span class="sub">每日请求</span></div>
+      <div class="chart-box"><div class="bars">
+        <div class="bcol" v-for="d in s.daily" :key="d.date"><div class="bwrap"><div class="bar" :style="{height:(d.requests/mx*100)+'%'}"><div class="btip">{{d.requests}} req · {{d.tokens}} tok</div></div></div><div class="blabel">{{d.date.slice(5)}}</div></div>
+      </div></div>
+    </div>
+    <div class="card" v-if="s.model_stats?.length">
+      <div class="card-h">模型分布</div>
+      <table><thead><tr><th>模型</th><th>请求</th><th>Token</th><th>占比</th></tr></thead><tbody>
+        <tr v-for="m in s.model_stats" :key="m.model"><td><code>{{m.model}}</code></td><td>{{m.count}}</td><td>{{m.tokens.toLocaleString()}}</td><td><div style="width:60px;height:4px;border-radius:2px;background:#f0f0f0;overflow:hidden"><div :style="{width:(m.count/s.total_requests*100)+'%',height:'100%',background:'#1a1a1a'}"></div></div></td></tr>
+      </tbody></table>
+    </div>
+  </template>
+</div>`
+}).component('accs',{props:['token','toast'],setup(p){
+  const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref('');
+  async function load(){ld.value=true;try{l.value=await api.get('/admin/accounts',p.token)}catch(e){p.toast('加载失败','err')}ld.value=false}
+  async function scan(){try{const r=await api.post('/admin/accounts/scan',{},p.token);p.toast('导入'+r.imported+' 更新'+r.updated);await load()}catch(e){p.toast('扫描失败','err')}}
+  async function add(){try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load()}catch(e){p.toast('失败:'+e.message,'err')}}
+  async function ref2(id){try{await api.post('/admin/accounts/'+id+'/refresh',{},p.token);p.toast('刷新成功');await load()}catch(e){p.toast('失败','err')}}
+  async function del(id){if(!confirm('删除?'))return;await api.del('/admin/accounts/'+id,p.token);p.toast('已删除');await load()}
+  onMounted(load);return{l,ld,sa,ai,nm,load,scan,add,ref2,del,I}
+},template:`
+<div>
+  <div class="phead"><h1>账号管理</h1><p>多账号轮询 · 最少使用优先</p></div>
+  <div class="tbar"><button class="btn s pri" @click="scan"><span v-html="I.scan"></span>扫描导入</button><button class="btn s" @click="sa=true"><span v-html="I.plus"></span>手动添加</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个 · {{l.filter(a=>a.status==='active').length}}活跃</span></div>
+  <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card" v-else-if="l.length"><table><thead><tr><th>账号</th><th>UID</th><th>状态</th><th>剩余</th><th>请求</th><th>Token</th><th>Credit</th><th></th></tr></thead><tbody>
+    <tr v-for="a in l" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name}}</td><td class="mono">{{a.uid?.slice(0,8)}}…</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td>{{a.token_expired?'过期':a.remaining_hours+'h'}}</td><td>{{a.total_requests}}</td><td>{{a.total_tokens?.toLocaleString()}}</td><td>{{a.total_credits}}</td><td><button class="btn s" @click="ref2(a.id)" style="margin-right:4px">刷新</button><button class="btn s danger" @click="del(a.id)">删除</button></td></tr>
+  </tbody></table></div>
+  <div class="card card-p empty" v-else><div class="em">🔌</div><p>暂无账号 · 点击「扫描导入」</p></div>
+  <div class="ov" v-if="sa" @click.self="sa=false"><div class="modal"><div class="modal-h"><h3>手动添加</h3><button class="x" @click="sa=false">&times;</button></div><div class="modal-b"><div class="field"><label>名称</label><input v-model="nm" placeholder="可选"/></div><div class="field"><label>Auth JSON</label><textarea v-model="ai" placeholder="粘贴 .info 文件内容"></textarea><div class="hint">完整 JSON</div></div></div><div class="modal-f"><button class="btn" @click="sa=false">取消</button><button class="btn pri" @click="add">添加</button></div></div></div>
+</div>`
+}).component('keys',{props:['token','toast'],setup(p){
+  const l=ref([]),ld=ref(true),sa=ref(false),f=reactive({name:'',models:'',limit:null}),res=ref('');
+  async function load(){ld.value=true;try{l.value=await api.get('/admin/api-keys',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
+  async function create(){try{const b={name:f.name};if(f.models)b.allowed_models=f.models.split(',').map(s=>s.trim()).filter(Boolean);if(f.limit)b.daily_limit=parseInt(f.limit);const r=await api.post('/admin/api-keys',b,p.token);res.value=r.key;p.toast('创建成功');await load()}catch(e){p.toast('失败','err')}}
+  async function toggle(k){await api.put('/admin/api-keys/'+k.id,{status:k.status==='active'?'inactive':'active'},p.token);await load()}
+  async function del(k){if(!confirm('删除?'))return;await api.del('/admin/api-keys/'+k.id,p.token);p.toast('已删除');await load()}
+  function cp(v){navigator.clipboard.writeText(v);p.toast('已复制','info')}
+  function close(){sa.value=false;res.value='';f.name='';f.models='';f.limit=null}
+  onMounted(load);return{l,ld,sa,f,res,load,create,toggle,del,cp,close,I}
+},template:`
+<div>
+  <div class="phead"><h1>API Keys</h1><p>客户端访问密钥</p></div>
+  <div class="tbar"><button class="btn s pri" @click="sa=true"><span v-html="I.plus"></span>创建</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个</span></div>
+  <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card" v-else-if="l.length"><table><thead><tr><th>名称</th><th>Key</th><th>状态</th><th>模型</th><th>今日/日限额</th><th>请求</th><th>Token</th><th></th></tr></thead><tbody>
+    <tr v-for="k in l" :key="k.id"><td style="font-weight:600">{{k.name||'-'}}</td><td class="mono">{{k.key_prefix||'-'}}</td><td><span class="badge" :class="k.status">{{k.status}}</span></td><td>{{k.allowed_models?k.allowed_models.join(', '):'全部'}}</td><td>{{k.today_requests||0}} / {{k.daily_limit||'不限'}}</td><td>{{k.total_requests}}</td><td>{{k.total_tokens?.toLocaleString()}}</td><td><button class="btn s" @click="toggle(k)" style="margin-right:4px">{{k.status==='active'?'禁用':'启用'}}</button><button class="btn s danger" @click="del(k)">删除</button></td></tr>
+  </tbody></table></div>
+  <div class="card card-p empty" v-else><div class="em">🔑</div><p>暂无 Key</p></div>
+  <div class="ov" v-if="sa" @click.self="close"><div class="modal"><div class="modal-h"><h3>创建 Key</h3><button class="x" @click="close">&times;</button></div><div class="modal-b"><template v-if="res"><div class="field"><label>新 Key</label><div class="keybox">{{res}}</div><button class="btn s pri" style="margin-top:8px" @click="cp(res)">复制</button><div class="hint">只显示这一次，关闭后无法再次查看完整 Key。</div></div></template><template v-else><div class="field"><label>名称</label><input v-model="f.name" placeholder="OpenClaw"/></div><div class="field"><label>允许模型</label><input v-model="f.models" placeholder="auto,glm-5.2（留空=全部）"/></div><div class="field"><label>每日请求限额</label><input v-model="f.limit" type="number" placeholder="不限"/></div></template></div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res">创建</button></div></div></div>
+</div>`
+}).component('mdls',{props:['token','toast'],setup(p){
+  const m=ref([]),ld=ref(true);
+  async function load(){ld.value=true;try{m.value=await api.get('/admin/models',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
+  async function save(){try{await api.put('/admin/models',m.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
+  function add(){m.value.push({id:'',name:''})}function rm(i){m.value.splice(i,1)}
+  onMounted(load);return{m,ld,load,save,add,rm}
+},template:`
+<div>
+  <div class="phead"><h1>模型配置</h1><p>/v1/models 列表</p></div>
+  <div class="tbar"><button class="btn s pri" @click="save">保存</button><button class="btn s" @click="add"><span v-html="I.plus"></span>添加</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
+  <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card" v-else><table><thead><tr><th>ID</th><th>名称</th><th></th></tr></thead><tbody>
+    <tr v-for="(x,i) in m" :key="i"><td><input v-model="x.id" style="width:100%;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px;font-family:var(--mono)"/></td><td><input v-model="x.name" style="width:100%;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px"/></td><td><button class="btn s danger" @click="rm(i)">删除</button></td></tr>
+  </tbody></table></div>
+  <div class="card card-p" style="margin-top:16px"><div style="font-weight:600;font-size:13px;margin-bottom:10px">接入说明</div><div class="codeblk"><span class="k">Base URL</span>: http://127.0.0.1:8787/v1
+<span class="k">API Key</span>:  在 API Keys 页面创建
+<span class="k">Models</span>:   auto, glm-5.2, kimi-k2.7, deepseek-v4-pro
+<span class="k">Stream</span>:   建议开启</div></div>
+</div>`
+}).component('lgs',{props:['token'],setup(p){
+  const l=ref([]),ld=ref(true);
+  async function load(){ld.value=true;try{l.value=await api.get('/admin/logs?limit=100',p.token)}catch(e){}ld.value=false}
+  function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'-'}
+  onMounted(load);return{l,ld,load,fmt,I}
+},template:`
+<div>
+  <div class="phead"><h1>请求日志</h1><p>最近 100 条</p></div>
+  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
+  <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card" v-else-if="l.length"><table><thead><tr><th>时间</th><th>Key</th><th>账号</th><th>模型</th><th>流</th><th>Token</th><th>Credit</th><th>耗时</th><th>状态</th></tr></thead><tbody>
+    <tr v-for="x in l" :key="x.id"><td class="mono">{{fmt(x.created_at)}}</td><td>{{x.api_key_name||'-'}}</td><td>{{x.account_name||'-'}}</td><td><code>{{x.model}}</code></td><td>{{x.stream?'⚡':'—'}}</td><td>{{x.total_tokens}}</td><td>{{x.credit}}</td><td>{{x.duration_ms}}ms</td><td><span class="badge" :class="x.status_code===200?'ok':'err'">{{x.status_code}}</span></td></tr>
+  </tbody></table></div>
+  <div class="card card-p empty" v-else><div class="em">📋</div><p>暂无记录</p></div>
+</div>`
+}).component('stgs',{props:['token','toast'],setup(p){
+  const s=ref({});
+  async function load(){try{s.value=await api.get('/admin/settings',p.token)}catch(e){p.toast('失败','err')}}
+  async function save(){try{await api.put('/admin/settings',s.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
+  onMounted(load);return{s,load,save}
+},template:`
+<div>
+  <div class="phead"><h1>设置</h1><p>系统配置</p></div>
+  <div class="tbar"><button class="btn s pri" @click="save">保存</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
+  <div class="card card-p"><div style="font-weight:600;font-size:13px;margin-bottom:14px">系统设置</div>
+    <div class="field"><label>后端地址</label><input v-model="s.backend_url" placeholder="https://copilot.tencent.com"/></div>
+    <div class="field"><label>默认域名</label><input v-model="s.default_domain" placeholder="www.codebuddy.cn"/></div>
+    <div class="field"><label>超时（秒）</label><input v-model="s.timeout" type="number" placeholder="300"/></div>
+  </div>
+  <div class="card card-p" style="margin-top:16px"><div style="font-weight:600;font-size:13px;margin-bottom:10px">快速接入</div>
+    <div class="codeblk"><span class="k"># OpenAI 兼容</span>
+Base URL: <span class="s">http://127.0.0.1:8787/v1</span>
+API Key:  <span class="s">API Keys 页面创建</span>
+
+<span class="k"># curl</span>
+curl http://127.0.0.1:8787/v1/chat/completions \\
+  -H <span class="s">"Authorization: Bearer YOUR_KEY"</span> \\
+  -d <span class="s">'{"model":"auto","messages":[{"role":"user","content":"hi"}]}'</span></div>
+  </div>
+</div>`
+}).mount('#app');
+</script>
+</body>
+</html>

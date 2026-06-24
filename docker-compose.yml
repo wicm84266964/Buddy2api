@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  codebuddy-gateway:
+    build: .
+    container_name: codebuddy-gateway
+    ports:
+      - "8787:8787"
+    volumes:
+      # 持久化数据库
+      - ./data:/app/data
+      # 挂载宿主机 auth 文件（Windows 路径按需修改）
+      # - /c/Users/YUNWU/AppData/Local/CodeBuddyExtension/Data/Public/auth:/auth:ro
+    environment:
+      - CB_GATEWAY_ADMIN_TOKEN=change-me
+      - CB_GATEWAY_DB_PATH=/app/data/codebuddy_gateway.db
+      # - CB_AUTH_DIR=/auth
+    restart: unless-stopped
+    # 如需使用宿主机 auth 文件，取消上面的 volumes 挂载注释
+    # 并取消上面的 CB_AUTH_DIR 注释

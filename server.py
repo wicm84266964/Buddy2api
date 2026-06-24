@@ -1,0 +1,403 @@
+"""
+server.py — CodeBuddy Gateway 主服务
+
+FastAPI 应用，包含：
+  - /v1/chat/completions  代理端点（OpenAI 兼容）
+  - /v1/models            模型列表
+  - /health               健康检查
+  - /admin/*              管理 API
+  - /                     Web UI
+"""
+
+import argparse
+import os
+import secrets
+import sys
+from pathlib import Path
+
+import uvicorn
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+
+import database as db
+import auth_manager
+import proxy
+
+app = FastAPI(title="CodeBuddy Gateway", version="1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+WEB_DIR = Path(__file__).parent / "web"
+
+
+# ============================================================
+# 中间件：管理 API 鉴权
+# ============================================================
+
+ADMIN_TOKEN: str = ""
+ALLOW_NO_ADMIN_AUTH = False
+
+
+def _check_admin(authorization: str | None):
+    if ALLOW_NO_ADMIN_AUTH:
+        return
+    token = ""
+    if authorization:
+        parts = authorization.split(" ", 1)
+        token = parts[1] if len(parts) == 2 else parts[0]
+    if not token or token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+def _check_client_auth(authorization: str | None, x_api_key: str | None):
+    """检查客户端 API Key。如果没有配置任何 key 则不校验。"""
+    keys = db.list_api_keys()
+    if not keys:
+        return None  # 没有配置任何 key，放行
+
+    token = ""
+    if x_api_key:
+        token = x_api_key
+    elif authorization:
+        parts = authorization.split(" ", 1)
+        token = parts[1] if len(parts) == 2 else parts[0]
+
+    if not token:
+        raise HTTPException(status_code=401, detail={"error": {"message": "API key required", "type": "invalid_request_error"}})
+
+    key_info = db.get_api_key_by_key(token)
+    if not key_info:
+        raise HTTPException(status_code=401, detail={"error": {"message": "Invalid API key", "type": "invalid_request_error"}})
+
+    daily_limit = int(key_info.get("daily_limit") or 0)
+    if daily_limit > 0:
+        used_today = db.get_api_key_daily_requests(key_info["id"])
+        if used_today >= daily_limit:
+            raise HTTPException(
+                status_code=429,
+                detail={"error": {"message": "Daily API key request limit exceeded", "type": "rate_limit_error"}},
+            )
+    return key_info
+
+
+# ============================================================
+# OpenAI 兼容端点
+# ============================================================
+
+@app.get("/health")
+async def health():
+    accounts = db.list_accounts()
+    active = [a for a in accounts if a.get("status") == "active"]
+    statuses = auth_manager.check_all_accounts()
+    return {
+        "status": "ok",
+        "accounts": len(accounts),
+        "active_accounts": len(active),
+        "account_statuses": statuses,
+    }
+
+
+@app.get("/v1/models")
+async def list_models():
+    models = db.get_setting("models", proxy.DEFAULT_MODELS)
+    return {
+        "object": "list",
+        "data": [
+            {"id": m["id"], "object": "model", "created": 0, "owned_by": "codebuddy"}
+            for m in models
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+):
+    api_key_info = _check_client_auth(authorization, x_api_key)
+
+    try:
+        payload = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail={"error": {"message": f"bad json: {e}", "type": "invalid_request_error"}})
+
+    messages = payload.get("messages") or []
+    if not messages:
+        raise HTTPException(status_code=400, detail={"error": {"message": "messages is required", "type": "invalid_request_error"}})
+
+    # 检查 API Key 模型权限
+    if api_key_info and api_key_info.get("allowed_models"):
+        model = payload.get("model", "auto")
+        if model not in api_key_info["allowed_models"]:
+            raise HTTPException(status_code=403, detail={"error": {"message": f"Model '{model}' not allowed for this API key", "type": "invalid_request_error"}})
+
+    result = await proxy.proxy_chat_completions(payload, api_key_info)
+
+    if result[0] == "error":
+        status, detail = result[1]
+        return JSONResponse(status_code=status, content=detail)
+    elif result[0] == "json":
+        return JSONResponse(content=result[1])
+    elif result[0] == "stream":
+        return StreamingResponse(
+            result[1],
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+
+# ============================================================
+# Admin API
+# ============================================================
+
+@app.get("/admin/stats")
+async def admin_stats(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return db.get_stats()
+
+
+# --- Accounts ---
+
+@app.get("/admin/accounts")
+async def admin_list_accounts(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    accounts = db.list_accounts()
+    result = []
+    for a in accounts:
+        s = auth_manager.get_account_status(a)
+        s["phone"] = a.get("phone", "")
+        s["account_type"] = a.get("account_type", "")
+        s["enterprise_id"] = a.get("enterprise_id", "")
+        s["domain"] = a.get("domain", "")
+        result.append(s)
+    return result
+
+
+@app.post("/admin/accounts/scan")
+async def admin_scan_accounts(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return auth_manager.auto_scan_and_import()
+
+
+@app.post("/admin/accounts")
+async def admin_add_account(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    # 直接粘贴 auth JSON
+    auth_data = data.get("auth", {})
+    account_data = data.get("account", {})
+    parsed = {
+        "name": account_data.get("nickname", data.get("name", "")),
+        "uid": account_data.get("uid", ""),
+        "nickname": account_data.get("nickname", ""),
+        "phone": account_data.get("phoneNumber", ""),
+        "account_type": account_data.get("type", "personal"),
+        "access_token": auth_data.get("accessToken", ""),
+        "refresh_token": auth_data.get("refreshToken", ""),
+        "expires_at": auth_data.get("expiresAt", 0),
+        "refresh_expires_at": auth_data.get("refreshExpiresAt", 0),
+        "domain": auth_data.get("domain", "www.codebuddy.cn"),
+        "enterprise_id": account_data.get("enterpriseId", ""),
+        "session_state": auth_data.get("sessionState", ""),
+    }
+    if not parsed["access_token"]:
+        raise HTTPException(status_code=400, detail="No accessToken found in auth data")
+    aid = db.add_account(parsed)
+    return {"id": aid, "status": "ok"}
+
+
+@app.put("/admin/accounts/{aid}")
+async def admin_update_account(
+    aid: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    db.update_account(aid, data)
+    return {"status": "ok"}
+
+
+@app.delete("/admin/accounts/{aid}")
+async def admin_delete_account(
+    aid: int,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    db.delete_account(aid)
+    return {"status": "ok"}
+
+
+@app.post("/admin/accounts/{aid}/refresh")
+async def admin_refresh_account(
+    aid: int,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    account = db.get_account(aid)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    ok = auth_manager.refresh_token(account)
+    return {"status": "ok" if ok else "failed"}
+
+
+# --- API Keys ---
+
+@app.get("/admin/api-keys")
+async def admin_list_keys(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return db.list_api_keys()
+
+
+@app.post("/admin/api-keys")
+async def admin_create_key(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    name = data.get("name", "")
+    allowed = data.get("allowed_models")
+    daily_limit = data.get("daily_limit")
+    # 生成 sk- 前缀的 key
+    key = f"sk-cb-{secrets.token_urlsafe(32)}"
+    kid = db.add_api_key(key, name, allowed, daily_limit)
+    return {"id": kid, "key": key, "status": "ok"}
+
+
+@app.put("/admin/api-keys/{kid}")
+async def admin_update_key(
+    kid: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    db.update_api_key(kid, data)
+    return {"status": "ok"}
+
+
+@app.delete("/admin/api-keys/{kid}")
+async def admin_delete_key(
+    kid: int,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    db.delete_api_key(kid)
+    return {"status": "ok"}
+
+
+# --- Logs ---
+
+@app.get("/admin/logs")
+async def admin_logs(
+    limit: int = 100,
+    offset: int = 0,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    return db.list_logs(limit, offset)
+
+
+# --- Settings ---
+
+@app.get("/admin/settings")
+async def admin_get_settings(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return db.get_all_settings()
+
+
+@app.put("/admin/settings")
+async def admin_update_settings(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    for k, v in data.items():
+        db.set_setting(k, v)
+    return {"status": "ok"}
+
+
+# --- Models ---
+
+@app.get("/admin/models")
+async def admin_get_models(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return db.get_setting("models", proxy.DEFAULT_MODELS)
+
+
+@app.put("/admin/models")
+async def admin_update_models(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await request.json()
+    db.set_setting("models", data)
+    return {"status": "ok"}
+
+
+# ============================================================
+# Web UI
+# ============================================================
+
+@app.get("/")
+async def index():
+    return FileResponse(str(WEB_DIR / "index.html"))
+
+
+# ============================================================
+# 启动
+# ============================================================
+
+def main():
+    global ADMIN_TOKEN, ALLOW_NO_ADMIN_AUTH
+
+    ap = argparse.ArgumentParser(description="CodeBuddy Gateway")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument("--admin-token", default=os.environ.get("CB_GATEWAY_ADMIN_TOKEN", ""),
+                    help="Admin API token. Defaults to CB_GATEWAY_ADMIN_TOKEN or a generated startup token.")
+    ap.add_argument("--no-admin-auth", action="store_true",
+                    help="Disable Admin API authentication. Only use on trusted local machines.")
+    ap.add_argument("--log-level", default="warning", choices=["debug","info","warning","error"],
+                    help="Log level")
+    args = ap.parse_args()
+
+    ALLOW_NO_ADMIN_AUTH = args.no_admin_auth
+    ADMIN_TOKEN = "" if ALLOW_NO_ADMIN_AUTH else (args.admin_token or f"cb-admin-{secrets.token_urlsafe(24)}")
+
+    db.init_db()
+
+    # 启动时自动扫描
+    result = auth_manager.auto_scan_and_import()
+    if result["imported"] or result["updated"]:
+        sys.stderr.write(f"[startup] Auto-scan: {result}\n")
+
+    accounts = db.list_accounts()
+    sys.stderr.write(f"\n")
+    sys.stderr.write(f"  CodeBuddy Gateway v1.0\n")
+    sys.stderr.write(f"  ========================\n")
+    sys.stderr.write(f"  监听: http://{args.host}:{args.port}\n")
+    sys.stderr.write(f"  账号: {len(accounts)} 个 ({sum(1 for a in accounts if a['status']=='active')} active)\n")
+    sys.stderr.write(f"  Admin: {'no auth' if ALLOW_NO_ADMIN_AUTH else 'enabled'}\n")
+    if ADMIN_TOKEN:
+        sys.stderr.write(f"  Admin Token: {ADMIN_TOKEN}\n")
+    sys.stderr.write(f"  ========================\n\n")
+
+    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+
+
+if __name__ == "__main__":
+    main()

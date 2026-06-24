@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.db-wal
+*.db-shm
+.env
+*.info
+*.log
+*.zip
+codebuddy2openai_协议逆向完整文档.md
+data/
+logs/
+.venv/
+venv/
+_mimo-backup-*/
