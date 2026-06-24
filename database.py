@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 import os
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -499,9 +500,9 @@ def get_stats() -> dict:
         (today_start,),
     ).fetchone()["c"]
 
-    # 最近 7 天每日统计
-    seven_days_ago = int(time.time()) - 7 * 86400
-    daily = conn.execute("""
+    # 最近 7 个自然日每日统计，补齐 0 值日期，避免图表只显示一根柱子。
+    seven_days_ago = _today_start_ts() - 6 * 86400
+    daily_rows = conn.execute("""
         SELECT date(created_at, 'unixepoch', 'localtime') as date,
                COUNT(*) as requests,
                COALESCE(SUM(total_tokens), 0) as tokens,
@@ -509,6 +510,17 @@ def get_stats() -> dict:
         FROM logs WHERE created_at >= ?
         GROUP BY date ORDER BY date
     """, (seven_days_ago,)).fetchall()
+    daily_by_date = {r["date"]: dict(r) for r in daily_rows}
+    today_date = date.today()
+    daily = []
+    for i in range(6, -1, -1):
+        day = (today_date - timedelta(days=i)).isoformat()
+        daily.append(daily_by_date.get(day, {
+            "date": day,
+            "requests": 0,
+            "tokens": 0,
+            "credits": 0,
+        }))
 
     # 模型使用统计
     model_stats = conn.execute("""
@@ -564,7 +576,7 @@ def get_stats() -> dict:
         "total_accounts": total_accounts,
         "active_keys": active_keys,
         "total_keys": total_keys,
-        "daily": [dict(r) for r in daily],
+        "daily": daily,
         "model_stats": [dict(r) for r in model_stats],
         "key_stats": [dict(r) for r in key_stats],
         "account_stats": [dict(r) for r in account_stats],
