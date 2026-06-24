@@ -25,7 +25,7 @@ code{font-family:var(--mono);font-size:12px}
 .layout{display:flex;min-height:100vh}
 .side{width:220px;border-right:1px solid var(--border);position:fixed;height:100vh;display:flex;flex-direction:column;background:var(--bg)}
 .main{flex:1;margin-left:220px}
-.content{padding:24px 32px;max-width:1000px}
+.content{padding:24px 32px;max-width:1180px}
 
 /* sidebar */
 .side-brand{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
@@ -93,6 +93,61 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .stat .sl{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px}
 .stat .sv{font-size:22px;font-weight:700;margin-top:6px;letter-spacing:-.5px}
 .stat .ss{font-size:11px;color:var(--fg3);margin-top:2px}
+.stat .sd{font-size:11px;margin-top:8px;color:var(--fg2);display:flex;align-items:center;gap:6px}
+.stat .sd.ok{color:var(--green)}.stat .sd.err{color:var(--red)}
+
+/* dashboard */
+.dash-hero{border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:16px;display:grid;grid-template-columns:1.2fr .8fr;gap:18px;align-items:center}
+.health-main{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.health-dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-bg)}
+.health-dot.warn{background:#d99700;box-shadow:0 0 0 4px #fff8e8}
+.health-dot.err{background:var(--red);box-shadow:0 0 0 4px var(--red-bg)}
+.health-title{font-size:17px;font-weight:700}
+.health-sub{font-size:12px;color:var(--fg3);line-height:1.7}
+.health-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.health-kpi{border:1px solid var(--border2);border-radius:4px;padding:9px 10px;background:var(--input)}
+.health-kpi .k{font-size:10px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px}
+.health-kpi .v{font-size:16px;font-weight:700;margin-top:3px}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.dash-grid.wide{grid-template-columns:1.25fr .75fr}
+.dash-grid.thirds{grid-template-columns:repeat(3,1fr)}
+.metric-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.metric{border:1px solid var(--border2);border-radius:4px;padding:12px;background:var(--input)}
+.metric .m-label{font-size:11px;color:var(--fg3)}
+.metric .m-value{font-size:18px;font-weight:700;margin-top:5px}
+.metric .m-sub{font-size:11px;color:var(--fg3);margin-top:3px}
+.progress{height:5px;border-radius:999px;background:var(--border2);overflow:hidden}
+.progress span{display:block;height:100%;background:var(--fg);border-radius:999px}
+.progress.ok span{background:var(--green)}.progress.err span{background:var(--red)}
+.rank-list{display:flex;flex-direction:column;gap:12px}
+.rank-item{display:grid;grid-template-columns:minmax(100px,1fr) 64px;gap:10px;align-items:center}
+.rank-name{font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank-meta{font-size:11px;color:var(--fg3);margin-top:3px}
+.rank-value{text-align:right;font-family:var(--mono);font-size:12px;color:var(--fg2)}
+.quick{display:grid;gap:10px}
+.quick-row{display:grid;grid-template-columns:88px 1fr auto;gap:8px;align-items:center}
+.quick-row .qk{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px}
+.quick-row .qv{font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border2);border-radius:4px;padding:6px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini-table td,.mini-table th{padding:8px 12px}
+.status-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.muted{color:var(--fg3)}
+.hint{font-size:11px;color:var(--fg3);margin-top:3px}
+
+/* account import */
+.detect-summary{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.detect-title{font-weight:700;margin-bottom:4px}
+.detect-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.detect-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.detect-box{border:1px solid var(--border2);border-radius:4px;background:var(--input);padding:10px;min-width:0}
+.detect-box h4{font-size:11px;color:var(--fg3);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:6px}
+.detect-path{display:flex;align-items:center;gap:8px;min-width:0;margin-top:7px}
+.detect-path code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.detect-custom{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center}
+.detect-custom input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:4px;font:inherit;font-size:13px;outline:none;background:var(--input)}
+.detect-custom input:focus{border-color:var(--blue);background:#fff}
+.detect-files{margin-top:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:disabled:hover{background:var(--bg);border-color:var(--border)}
 
 /* modal */
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.25);z-index:1000;display:flex;align-items:center;justify-content:center}
@@ -139,6 +194,12 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .codeblk .k{color:#6cb6ff}.codeblk .s{color:#f0c674}
 .keybox{font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border);padding:8px 12px;border-radius:4px;word-break:break-all;user-select:all}
 .tag{display:inline-block;padding:1px 7px;border-radius:3px;font-size:11px;background:var(--hover);color:var(--fg2)}
+@media (max-width:900px){
+  .side{position:static;width:100%;height:auto}.layout{display:block}.main{margin-left:0}.content{padding:18px;max-width:none}
+  .stats,.dash-grid,.dash-grid.wide,.dash-grid.thirds,.dash-hero,.detect-grid,.detect-custom{grid-template-columns:1fr}
+  .metric-row,.health-kpis{grid-template-columns:1fr}
+  .detect-summary{display:block}.detect-actions{justify-content:flex-start;margin-top:10px}
+}
 </style>
 </head>
 <body>
@@ -204,54 +265,193 @@ createApp({
     <div class="toasts"><div class="toast" :class="toast?.t" v-if="toast">{{toast.m}}</div></div>
   </div>`
 }).component('dash',{props:['token','toast'],setup(p){
-  const s=ref(null),ld=ref(true);
-  async function load(){ld.value=true;try{s.value=await api.get('/admin/stats',p.token)}catch(e){p.toast('加载失败','err')}ld.value=false}
-  onMounted(load);const mx=computed(()=>s.value?.daily?.length?Math.max(...s.value.daily.map(d=>d.requests),1):1);
-  return{s,ld,load,mx}
+  const s=ref(null),ld=ref(true),copied=ref(''),err=ref('');
+  async function load(){ld.value=true;err.value='';try{s.value=await api.get('/admin/stats',p.token)}catch(e){s.value=null;err.value=e.message==='401'?'Admin Token 无效或未设置':'加载失败：'+e.message;p.toast('加载失败','err')}ld.value=false}
+  function n(v){return Number(v||0).toLocaleString()}
+  function pct(v){return (Number(v||0)).toFixed(Number(v||0)%1?1:0)+'%'}
+  function money(v){return Number(v||0).toFixed(4).replace(/\.?0+$/,'')}
+  function ms(v){v=Number(v||0);return v>=1000?(v/1000).toFixed(1)+'s':v+'ms'}
+  function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}
+  function healthClass(){if(!s.value?.active_accounts||!s.value?.active_keys)return 'err';if((s.value?.today?.errors||0)>0||s.value?.filtered_requests>0)return 'warn';return ''}
+  function healthText(){if(!s.value?.active_accounts)return '无可用账号';if(!s.value?.active_keys)return '无可用 API Key';if((s.value?.today?.errors||0)>0)return '有请求异常';if(s.value?.filtered_requests>0)return '存在内容过滤';return '运行正常'}
+  function rateWidth(v){return Math.max(0,Math.min(100,Number(v||0)))+'%'}
+  function modelPct(m){return s.value?.total_requests?rateWidth(m.count/s.value.total_requests*100):'0%'}
+  function copy(v,name){navigator.clipboard.writeText(v);copied.value=name;p.toast('已复制','info');setTimeout(()=>copied.value='',1200)}
+  const mx=computed(()=>s.value?.daily?.length?Math.max(...s.value.daily.map(d=>d.requests),1):1);
+  onMounted(load);
+  return{s,ld,copied,err,load,n,pct,money,ms,fmt,healthClass,healthText,rateWidth,modelPct,copy,mx,I}
 },template:`
 <div>
-  <div class="phead"><h1>Dashboard</h1><p>系统概览</p></div>
-  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div></div>
+  <div class="phead"><h1>Dashboard</h1><p>网关运行状态、今日用量和最近请求</p></div>
+  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div><span class="tag" v-if="s">Base URL · 127.0.0.1:8787/v1</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
+  <div class="card card-p empty" v-else-if="err"><div class="em">!</div><p style="font-weight:600;color:var(--fg)">{{err}}</p><p style="margin-top:6px">请点击左下角「设置 Token」，填入服务启动日志里的 Admin Token。</p></div>
   <template v-else-if="s">
+    <div class="dash-hero">
+      <div>
+        <div class="health-main"><span class="health-dot" :class="healthClass()"></span><div><div class="health-title">{{healthText()}}</div><div class="health-sub">本机 OpenAI 兼容网关 · {{s.active_accounts}}/{{s.total_accounts}} 账号可用 · {{s.active_keys}}/{{s.total_keys}} Key 可用</div></div></div>
+        <div class="status-line">
+          <span class="badge" :class="s.active_accounts?'ok':'err'">Accounts {{s.active_accounts}}</span>
+          <span class="badge" :class="s.active_keys?'ok':'err'">Keys {{s.active_keys}}</span>
+          <span class="badge" :class="s.today?.errors?'err':'ok'">Errors {{s.today?.errors||0}}</span>
+          <span class="tag">Filtered {{s.today?.filtered||0}}</span>
+        </div>
+      </div>
+      <div class="health-kpis">
+        <div class="health-kpi"><div class="k">今日请求</div><div class="v">{{n(s.today?.requests)}}</div></div>
+        <div class="health-kpi"><div class="k">今日成功率</div><div class="v">{{pct(s.today?.success_rate)}}</div></div>
+        <div class="health-kpi"><div class="k">平均耗时</div><div class="v">{{ms(s.today?.avg_duration_ms)}}</div></div>
+      </div>
+    </div>
+
     <div class="stats">
-      <div class="stat"><div class="sl">总请求</div><div class="sv">{{s.total_requests}}</div><div class="ss">all time</div></div>
-      <div class="stat"><div class="sl">Token 消耗</div><div class="sv">{{s.total_tokens.toLocaleString()}}</div><div class="ss">prompt+completion</div></div>
-      <div class="stat"><div class="sl">Credit</div><div class="sv">{{s.total_credit}}</div><div class="ss">腾讯计费单位</div></div>
-      <div class="stat"><div class="sl">活跃</div><div class="sv">{{s.active_accounts}}<span style="font-size:13px;color:#999;font-weight:400">/{{s.active_keys}}</span></div><div class="ss">账号 / Keys</div></div>
+      <div class="stat"><div class="sl">总请求</div><div class="sv">{{n(s.total_requests)}}</div><div class="ss">all time</div><div class="sd ok">成功 {{n(s.success_requests)}} · {{pct(s.success_rate)}}</div></div>
+      <div class="stat"><div class="sl">Token 消耗</div><div class="sv">{{n(s.total_tokens)}}</div><div class="ss">今日 {{n(s.today?.tokens)}}</div><div class="sd">平均 {{s.total_requests? n(Math.round(s.total_tokens/s.total_requests)) : 0}} / req</div></div>
+      <div class="stat"><div class="sl">Credit</div><div class="sv">{{money(s.total_credit)}}</div><div class="ss">今日 {{money(s.today?.credit)}}</div><div class="sd">计费单位</div></div>
+      <div class="stat"><div class="sl">异常</div><div class="sv">{{n(s.error_requests + s.filtered_requests)}}</div><div class="ss">错误 {{n(s.error_requests)}} · 过滤 {{n(s.filtered_requests)}}</div><div class="sd" :class="s.error_requests||s.filtered_requests?'err':'ok'">{{s.error_requests||s.filtered_requests?'需要关注':'暂无异常'}}</div></div>
     </div>
-    <div class="card" v-if="s.daily?.length">
-      <div class="card-h">7 天趋势<span class="sub">每日请求</span></div>
-      <div class="chart-box"><div class="bars">
-        <div class="bcol" v-for="d in s.daily" :key="d.date"><div class="bwrap"><div class="bar" :style="{height:(d.requests/mx*100)+'%'}"><div class="btip">{{d.requests}} req · {{d.tokens}} tok</div></div></div><div class="blabel">{{d.date.slice(5)}}</div></div>
-      </div></div>
+
+    <div class="dash-grid wide">
+      <div class="card">
+        <div class="card-h">7 天请求趋势<span class="sub">Requests / Tokens / Credit</span></div>
+        <div class="chart-box" v-if="s.daily?.length"><div class="bars">
+          <div class="bcol" v-for="d in s.daily" :key="d.date"><div class="bwrap"><div class="bar" :style="{height:(d.requests/mx*100)+'%'}"><div class="btip">{{d.requests}} req · {{n(d.tokens)}} tok · {{money(d.credits)}} cr</div></div></div><div class="blabel">{{d.date.slice(5)}}</div></div>
+        </div></div>
+        <div class="empty" v-else>暂无趋势数据</div>
+      </div>
+      <div class="card">
+        <div class="card-h">快速接入<span class="sub">OpenAI Compatible</span></div>
+        <div class="card-p quick">
+          <div class="quick-row"><div class="qk">Base URL</div><div class="qv">http://127.0.0.1:8787/v1</div><button class="btn s" @click="copy('http://127.0.0.1:8787/v1','base')">{{copied==='base'?'已复制':'复制'}}</button></div>
+          <div class="quick-row"><div class="qk">Models</div><div class="qv">auto, glm-5.2, kimi-k2.7, deepseek-v4-pro</div><button class="btn s" @click="copy('auto','model')">{{copied==='model'?'已复制':'复制'}}</button></div>
+          <div class="quick-row"><div class="qk">Auth</div><div class="qv">Authorization: Bearer sk-cb-...</div><span class="tag">API Keys</span></div>
+          <div class="codeblk" style="margin-top:2px"><span class="k">curl</span> http://127.0.0.1:8787/v1/chat/completions \\
+  -H <span class="s">"Authorization: Bearer YOUR_KEY"</span> \\
+  -d <span class="s">'{"model":"auto","messages":[{"role":"user","content":"hi"}]}'</span></div>
+        </div>
+      </div>
     </div>
-    <div class="card" v-if="s.model_stats?.length">
-      <div class="card-h">模型分布</div>
-      <table><thead><tr><th>模型</th><th>请求</th><th>Token</th><th>占比</th></tr></thead><tbody>
-        <tr v-for="m in s.model_stats" :key="m.model"><td><code>{{m.model}}</code></td><td>{{m.count}}</td><td>{{m.tokens.toLocaleString()}}</td><td><div style="width:60px;height:4px;border-radius:2px;background:#f0f0f0;overflow:hidden"><div :style="{width:(m.count/s.total_requests*100)+'%',height:'100%',background:'#1a1a1a'}"></div></div></td></tr>
+
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-h">模型排行<span class="sub">按请求数</span></div>
+        <div class="card-p rank-list" v-if="s.model_stats?.length">
+          <div class="rank-item" v-for="m in s.model_stats" :key="m.model">
+            <div><div class="rank-name"><code>{{m.model}}</code></div><div class="rank-meta">{{n(m.tokens)}} tokens · {{money(m.credit)}} credit · {{ms(m.avg_duration_ms)}}</div><div class="progress" style="margin-top:7px"><span :style="{width:modelPct(m)}"></span></div></div>
+            <div class="rank-value">{{n(m.count)}} req</div>
+          </div>
+        </div>
+        <div class="empty" v-else>暂无模型数据</div>
+      </div>
+      <div class="card">
+        <div class="card-h">账号状态<span class="sub">最多 5 个</span></div>
+        <table class="mini-table" v-if="s.account_stats?.length"><thead><tr><th>账号</th><th>状态</th><th>请求</th><th>最近</th></tr></thead><tbody>
+          <tr v-for="a in s.account_stats" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name||'-'}}</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td>{{n(a.total_requests)}}</td><td class="mono">{{fmt(a.last_used_at)}}</td></tr>
+        </tbody></table>
+        <div class="empty" v-else>暂无账号</div>
+      </div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-h">Key 使用排行<span class="sub">最多 5 个</span></div>
+        <table class="mini-table" v-if="s.key_stats?.length"><thead><tr><th>Key</th><th>请求</th><th>Token</th><th>最近</th></tr></thead><tbody>
+          <tr v-for="k in s.key_stats" :key="k.name"><td style="font-weight:600">{{k.name||'-'}}</td><td>{{n(k.count)}}</td><td>{{n(k.tokens)}}</td><td class="mono">{{fmt(k.last_used_at)}}</td></tr>
+        </tbody></table>
+        <div class="empty" v-else>暂无 Key 使用记录</div>
+      </div>
+      <div class="card">
+        <div class="card-h">今日质量<span class="sub">请求结果</span></div>
+        <div class="card-p">
+          <div class="metric-row">
+            <div class="metric"><div class="m-label">成功</div><div class="m-value">{{n(s.today?.success)}}</div><div class="m-sub">{{pct(s.today?.success_rate)}}</div></div>
+            <div class="metric"><div class="m-label">错误</div><div class="m-value">{{n(s.today?.errors)}}</div><div class="m-sub">HTTP / upstream</div></div>
+            <div class="metric"><div class="m-label">过滤</div><div class="m-value">{{n(s.today?.filtered)}}</div><div class="m-sub">content_filter</div></div>
+          </div>
+          <div class="progress ok" style="margin-top:14px"><span :style="{width:rateWidth(s.today?.success_rate)}"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">最近请求<span class="sub">最新 8 条</span></div>
+      <table class="mini-table" v-if="s.recent_logs?.length"><thead><tr><th>时间</th><th>Key</th><th>账号</th><th>模型</th><th>Token</th><th>Credit</th><th>耗时</th><th>结果</th></tr></thead><tbody>
+        <tr v-for="x in s.recent_logs" :key="x.id"><td class="mono">{{fmt(x.created_at)}}</td><td>{{x.api_key_name||'-'}}</td><td>{{x.account_name||'-'}}</td><td><code>{{x.model}}</code></td><td>{{n(x.total_tokens)}}</td><td>{{money(x.credit)}}</td><td>{{ms(x.duration_ms)}}</td><td><span class="badge" :class="x.status_code===200&&x.finish_reason!=='error'?'ok':'err'">{{x.finish_reason||x.status_code}}</span></td></tr>
       </tbody></table>
+      <div class="empty" v-else>暂无请求记录</div>
     </div>
   </template>
 </div>`
 }).component('accs',{props:['token','toast'],setup(p){
-  const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref('');
+  const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref(''),disc=ref(null),dl=ref(false),authPath=ref('');
   async function load(){ld.value=true;try{l.value=await api.get('/admin/accounts',p.token)}catch(e){p.toast('加载失败','err')}ld.value=false}
-  async function scan(){try{const r=await api.post('/admin/accounts/scan',{},p.token);p.toast('导入'+r.imported+' 更新'+r.updated);await load()}catch(e){p.toast('扫描失败','err')}}
-  async function add(){try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load()}catch(e){p.toast('失败:'+e.message,'err')}}
+  async function discover(path=''){dl.value=true;try{const q=path&&path.trim()?('?auth_dir='+encodeURIComponent(path.trim())):'';disc.value=await api.get('/admin/accounts/discover'+q,p.token)}catch(e){p.toast('检测失败','err')}dl.value=false}
+  async function scan(path=''){try{const body=path&&path.trim()?{auth_dir:path.trim()}:{};const r=await api.post('/admin/accounts/scan',body,p.token);p.toast('导入 '+r.imported+' · 更新 '+r.updated+' · 跳过 '+r.skipped);await load();await discover(path)}catch(e){p.toast('扫描失败','err')}}
+  async function scanCustom(){const path=authPath.value.trim();if(!path){p.toast('请先填写目录或 .info 文件路径','err');return}await scan(path)}
+  async function add(){try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load();await discover(authPath.value)}catch(e){p.toast('失败:'+e.message,'err')}}
   async function ref2(id){try{await api.post('/admin/accounts/'+id+'/refresh',{},p.token);p.toast('刷新成功');await load()}catch(e){p.toast('失败','err')}}
-  async function del(id){if(!confirm('删除?'))return;await api.del('/admin/accounts/'+id,p.token);p.toast('已删除');await load()}
-  onMounted(load);return{l,ld,sa,ai,nm,load,scan,add,ref2,del,I}
+  async function del(id){if(!confirm('删除?'))return;await api.del('/admin/accounts/'+id,p.token);p.toast('已删除');await load();await discover(authPath.value)}
+  function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}
+  function size(v){v=Number(v||0);if(v>=1024*1024)return(v/1024/1024).toFixed(1)+' MB';if(v>=1024)return(v/1024).toFixed(1)+' KB';return v+' B'}
+  function clearPath(){authPath.value='';discover('')}
+  onMounted(()=>{load();discover()});return{l,ld,sa,ai,nm,disc,dl,authPath,load,discover,scan,scanCustom,add,ref2,del,fmt,size,clearPath,I}
 },template:`
 <div>
   <div class="phead"><h1>账号管理</h1><p>多账号轮询 · 最少使用优先</p></div>
-  <div class="tbar"><button class="btn s pri" @click="scan"><span v-html="I.scan"></span>扫描导入</button><button class="btn s" @click="sa=true"><span v-html="I.plus"></span>手动添加</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个 · {{l.filter(a=>a.status==='active').length}}活跃</span></div>
+  <div class="card">
+    <div class="card-h">本机登录检测<span class="sub">只显示文件信息，不显示 token</span></div>
+    <div class="card-p">
+      <div class="detect-summary">
+        <div>
+          <div class="detect-title" v-if="disc">检测到 {{disc.file_count}} 个 .info 文件，其中 {{disc.valid_count}} 个有效</div>
+          <div class="detect-title" v-else>正在检测本机登录文件</div>
+          <div class="hint">Work Buddy 已在本机登录时，通常直接点“一键导入”即可；路径不标准时再填下面的自定义路径。</div>
+        </div>
+        <div class="detect-actions">
+          <button class="btn s pri" @click="scan('')" :disabled="dl||!disc?.valid_count"><span v-html="I.scan"></span>一键导入本机登录</button>
+          <button class="btn s" @click="discover('')" :disabled="dl"><span v-html="I.refresh"></span>重新检测</button>
+        </div>
+      </div>
+      <div v-if="dl" class="load" style="padding:18px"><div class="spin"></div></div>
+      <template v-else>
+        <div class="detect-grid">
+          <div class="detect-box">
+            <h4>默认扫描目录</h4>
+            <div v-if="disc?.dirs?.length">
+              <div class="detect-path" v-for="d in disc.dirs" :key="d.path">
+                <span class="badge" :class="d.exists?(d.file_count?'ok':'inactive'):'err'">{{d.exists?d.file_count+' 个文件':'不存在'}}</span>
+                <code :title="d.path">{{d.path}}</code>
+              </div>
+            </div>
+            <div class="muted" v-else>暂无目录信息</div>
+          </div>
+          <div class="detect-box">
+            <h4>自定义路径</h4>
+            <div class="detect-custom">
+              <input v-model="authPath" placeholder="auth 目录或 workbuddy-desktop.info 完整路径"/>
+              <button class="btn s" @click="discover(authPath)" :disabled="dl">检测</button>
+              <button class="btn s pri" @click="scanCustom" :disabled="dl">导入</button>
+              <button class="btn s" @click="clearPath" :disabled="dl">清空</button>
+            </div>
+            <div class="hint">可以直接粘贴 <span class="mono">C:/Users/.../auth</span> 或某个 <span class="mono">.info</span> 文件路径。</div>
+          </div>
+        </div>
+        <div class="detect-files">
+          <table class="mini-table" v-if="disc?.files?.length"><thead><tr><th>文件</th><th>状态</th><th>UID</th><th>域名</th><th>修改时间</th><th>大小</th><th>目录</th></tr></thead><tbody>
+            <tr v-for="f in disc.files" :key="f.path"><td><div style="font-weight:600">{{f.account_name||f.name}}</div><div class="mono" :title="f.path">{{f.name}}</div></td><td><span class="badge" :class="f.valid?(f.already_imported?'inactive':'ok'):'err'">{{f.valid?(f.already_imported?'已导入':'可导入'):'无效'}}</span></td><td class="mono">{{f.uid_masked||'-'}}</td><td>{{f.domain||'-'}}</td><td class="mono">{{fmt(f.mtime)}}</td><td>{{size(f.size)}}</td><td class="mono" :title="f.dir">{{f.dir}}</td></tr>
+          </tbody></table>
+          <div class="empty" style="padding:18px" v-else>未检测到 .info 文件</div>
+        </div>
+      </template>
+    </div>
+  </div>
+  <div class="tbar"><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新列表</button><button class="btn s" @click="sa=true"><span v-html="I.plus"></span>高级手动添加</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个 · {{l.filter(a=>a.status==='active').length}}活跃</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
   <div class="card" v-else-if="l.length"><table><thead><tr><th>账号</th><th>UID</th><th>状态</th><th>剩余</th><th>请求</th><th>Token</th><th>Credit</th><th></th></tr></thead><tbody>
     <tr v-for="a in l" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name}}</td><td class="mono">{{a.uid?.slice(0,8)}}…</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td>{{a.token_expired?'过期':a.remaining_hours+'h'}}</td><td>{{a.total_requests}}</td><td>{{a.total_tokens?.toLocaleString()}}</td><td>{{a.total_credits}}</td><td><button class="btn s" @click="ref2(a.id)" style="margin-right:4px">刷新</button><button class="btn s danger" @click="del(a.id)">删除</button></td></tr>
   </tbody></table></div>
-  <div class="card card-p empty" v-else><div class="em">🔌</div><p>暂无账号 · 点击「扫描导入」</p></div>
-  <div class="ov" v-if="sa" @click.self="sa=false"><div class="modal"><div class="modal-h"><h3>手动添加</h3><button class="x" @click="sa=false">&times;</button></div><div class="modal-b"><div class="field"><label>名称</label><input v-model="nm" placeholder="可选"/></div><div class="field"><label>Auth JSON</label><textarea v-model="ai" placeholder="粘贴 .info 文件内容"></textarea><div class="hint">完整 JSON</div></div></div><div class="modal-f"><button class="btn" @click="sa=false">取消</button><button class="btn pri" @click="add">添加</button></div></div></div>
+  <div class="card card-p empty" v-else><div class="em">🔌</div><p>暂无账号 · 先使用上方本机登录检测导入</p></div>
+  <div class="ov" v-if="sa" @click.self="sa=false"><div class="modal"><div class="modal-h"><h3>高级手动添加</h3><button class="x" @click="sa=false">&times;</button></div><div class="modal-b"><div class="field"><label>名称</label><input v-model="nm" placeholder="可选"/></div><div class="field"><label>Auth JSON</label><textarea v-model="ai" placeholder="粘贴 .info 文件内容"></textarea><div class="hint">只有自动检测失败时才需要手动粘贴完整 JSON。</div></div></div><div class="modal-f"><button class="btn" @click="sa=false">取消</button><button class="btn pri" @click="add">添加</button></div></div></div>
 </div>`
 }).component('keys',{props:['token','toast'],setup(p){
   const l=ref([]),ld=ref(true),sa=ref(false),f=reactive({name:'',models:'',limit:null}),res=ref('');

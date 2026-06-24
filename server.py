@@ -181,10 +181,27 @@ async def admin_list_accounts(authorization: str | None = Header(default=None)):
     return result
 
 
-@app.post("/admin/accounts/scan")
-async def admin_scan_accounts(authorization: str | None = Header(default=None)):
+@app.get("/admin/accounts/discover")
+async def admin_discover_accounts(
+    auth_dir: str | None = None,
+    authorization: str | None = Header(default=None),
+):
     _check_admin(authorization)
-    return auth_manager.auto_scan_and_import()
+    return auth_manager.discover_auth_files(auth_dir)
+
+
+@app.post("/admin/accounts/scan")
+async def admin_scan_accounts(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    auth_dir = data.get("auth_dir") if isinstance(data, dict) else None
+    return auth_manager.auto_scan_and_import(auth_dir)
 
 
 @app.post("/admin/accounts")

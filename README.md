@@ -1,34 +1,58 @@
-# Buddy 2 API
+# Work Buddy 2 API
 
 [English](README_EN.md) | 中文
 
-> 将桌面端 AI 编程助手的订阅额度转换为标准 OpenAI 兼容 API，带 Web 管理界面。
+> 把本机已经登录的腾讯 Work Buddy / CodeBuddy 账号接成 OpenAI 兼容 API，方便在 OpenCode、OpenClaw、Cherry Studio、NextChat 等工具里使用。
 
 ## 这是什么？
 
-如果你正在用腾讯那只"龙虾"（Claw）的 AI 编程插件，你会发现它自带的模型额度只能在插件内使用。Buddy 2 API 帮你把这些额度"解放"出来，变成标准的 OpenAI API 接口，这样你就可以在 OpenClaw、Cherry Studio、NextChat 等任意客户端中使用。
+Work Buddy 2 API 是一个本地网关。它会扫描本机 Work Buddy / CodeBuddy 桌面端或插件保存的登录凭据，把请求转发到腾讯的模型接口，并在本机提供标准 OpenAI 兼容接口。
+
+简单说：你已经在 Work Buddy 里登录并且有可用额度，这个项目把这份额度通过 `http://127.0.0.1:8787/v1` 暴露出来，让其他支持 OpenAI API 的客户端也能调用。
+
+这个项目主要用于本地自用和测试。不要公开部署，不要共享给别人用，也不要把自己的登录凭据、API Key 或数据库文件发出去。
 
 ## 功能
 
-- **OpenAI 兼容**：`/v1/chat/completions`（流式 SSE + 非流式）、`/v1/models`
-- **多账号轮询**：自动扫描导入，最少使用优先负载均衡，故障自动切换
-- **Token 自动刷新**：提前 60s 判定过期，自动调刷新接口并回写
-- **API Key 管理**：创建/禁用/删除，模型权限控制，Key 仅保存 SHA-256 哈希
-- **Web 管理界面**：Dashboard / 账号 / Key / 模型 / 日志 / 设置
-- **Function Calling**：原生 `tools` / `tool_calls` 透传
-- **请求日志**：Token 消耗、Credit、耗时、状态码
-- **基础限额**：API Key 可设置每日请求次数上限
-- **模型别名**：内置常用别名（gpt-4o、claude-3.5-sonnet 等），支持自定义扩展
+- **OpenAI 兼容接口**：支持 `/v1/chat/completions` 和 `/v1/models`
+- **流式输出**：支持 SSE 流式响应，也支持非流式聚合响应
+- **自动导入账号**：启动时扫描本机 Work Buddy / CodeBuddy 的 auth 文件
+- **多账号轮询**：支持多个账号，按最少使用优先，失败后自动切换
+- **Token 自动刷新**：登录 token 快过期时自动刷新并写回数据库
+- **API Key 管理**：给 OpenCode、Cherry Studio 等客户端单独创建 key
+- **Key 安全存储**：只保存 SHA-256 哈希，完整 key 只在创建时显示一次
+- **模型权限控制**：可以限制某个 key 只能使用指定模型
+- **每日请求限额**：可以给 key 设置每日请求次数上限
+- **Web 管理界面**：账号、API Keys、模型、日志、设置都可以在网页里管理
+- **请求日志**：记录模型、token、credit、耗时、状态码和错误信息
+- **Function Calling 透传**：支持 `tools` / `tool_calls`
+- **模型别名**：内置常见别名，也支持自己扩展
+
+## 前提条件
+
+1. 本机已经安装并登录腾讯 Work Buddy / CodeBuddy。
+2. 登录账号还有可用模型额度。
+3. 本项目和调用客户端最好都运行在同一台机器上。
+
+Windows 默认扫描路径类似：
+
+```text
+%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth
+```
+
+如果你的 auth 文件在别的目录，可以用 `CB_AUTH_DIR` 指定。
 
 ## 快速开始
 
 ### Windows
 
+双击：
+
 ```bat
-双击 start.bat
+start.bat
 ```
 
-或手动：
+或手动启动：
 
 ```powershell
 pip install fastapi "uvicorn[standard]" httpx
@@ -57,29 +81,71 @@ chmod +x start.sh
 docker-compose up -d
 ```
 
-打开浏览器访问 `http://127.0.0.1:8787`
+启动后访问：
 
-## 前提条件
+```text
+http://127.0.0.1:8787
+```
 
-1. 已安装桌面端 AI 编程助手（VS Code 插件形式）
-2. 插件已登录账号，拥有可用的模型额度
+## 使用流程
 
-启动时自动扫描本机 auth 文件导入账号。
+1. 先打开 Work Buddy / CodeBuddy，确认已经登录。
+2. 启动本项目。
+3. 在 Web UI 的「账号」页面确认账号已导入。
+4. 在「API Keys」页面创建一个给客户端用的 key。
+5. 在 OpenCode、OpenClaw、Cherry Studio、NextChat 等客户端里填入 Base URL 和 API Key。
 
 ## 客户端接入
-
-### OpenClaw / Cherry Studio / NextChat 等
 
 | 字段 | 值 |
 |---|---|
 | Base URL | `http://127.0.0.1:8787/v1` |
 | API Key | Web UI「API Keys」页面创建 |
-| Model | `auto` / `glm-5.2` / `kimi-k2.7` / `deepseek-v4-pro` 等 |
+| Model | `auto` / `glm-5.2` / `glm-5.1` / `kimi-k2.7` / `deepseek-v4-pro` / `deepseek-v4-flash` |
 | Stream | 建议开启 |
 
-支持模型别名映射：`gpt-4o` → `glm-5.2`、`claude-3.5-sonnet` → `deepseek-v4-pro` 等。
+### OpenCode 示例
 
-### curl
+在 OpenCode 里添加一个 OpenAI-compatible provider：
+
+```json
+{
+  "provider": {
+    "workbuddy": {
+      "name": "workbuddy",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:8787/v1",
+        "apiKey": "sk-cb-xxxxx"
+      },
+      "models": {
+        "auto": {
+          "name": "WorkBuddy Auto",
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          }
+        },
+        "glm-5.2": {
+          "name": "GLM-5.2",
+          "limit": {
+            "context": 200000,
+            "output": 32000
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+调用：
+
+```powershell
+opencode run -m workbuddy/auto "你好"
+```
+
+### curl 示例
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
@@ -95,23 +161,31 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `--host` | `127.0.0.1` | 监听地址 |
 | `--port` | `8787` | 监听端口 |
 | `--admin-token` | 自动生成 | 管理 API Token |
-| `--no-admin-auth` | `false` | 关闭管理 API 鉴权 |
+| `--no-admin-auth` | `false` | 关闭管理 API 鉴权，仅建议本机临时测试 |
 
-### 环境变量
+## 环境变量
 
 | 变量 | 说明 |
 |---|---|
 | `CB_GATEWAY_ADMIN_TOKEN` | 固定管理后台 Token |
 | `CB_GATEWAY_DB_PATH` | SQLite 数据库路径 |
-| `CB_AUTH_DIR` | 指定 auth 文件目录 |
+| `CB_AUTH_DIR` | 指定 Work Buddy / CodeBuddy auth 文件目录 |
+
+## 数据和安全
+
+- `codebuddy_gateway.db` 会保存导入的账号凭据和请求日志。
+- API Key 只保存哈希，创建后完整 key 不会再次显示。
+- 不要把数据库、auth 文件、`.lab-agent`、日志或截图发给别人。
+- 不建议把服务监听到公网地址。
+- 如果只是本机使用，保持默认 `127.0.0.1` 最安全。
 
 ## 文件结构
 
-```
+```text
 buddy2api/
 ├── server.py           # FastAPI 主服务
 ├── proxy.py            # 请求代理转发
-├── auth_manager.py     # 多账号管理
+├── auth_manager.py     # Work Buddy / CodeBuddy 登录凭据管理
 ├── database.py         # SQLite 数据层
 ├── web/index.html      # Vue 3 Web UI
 ├── Dockerfile

@@ -435,8 +435,41 @@ def get_stats() -> dict:
     total_requests = conn.execute("SELECT COUNT(*) as c FROM logs").fetchone()["c"]
     total_tokens = conn.execute("SELECT COALESCE(SUM(total_tokens),0) as s FROM logs").fetchone()["s"]
     total_credit = conn.execute("SELECT COALESCE(SUM(credit),0) as s FROM logs").fetchone()["s"]
+    success_requests = conn.execute("""
+        SELECT COUNT(*) as c FROM logs
+        WHERE status_code BETWEEN 200 AND 299
+          AND finish_reason NOT IN ('error', 'content_filter')
+    """).fetchone()["c"]
+    error_requests = conn.execute("SELECT COUNT(*) as c FROM logs WHERE status_code < 200 OR status_code >= 300 OR finish_reason='error'").fetchone()["c"]
+    filtered_requests = conn.execute("SELECT COUNT(*) as c FROM logs WHERE finish_reason='content_filter'").fetchone()["c"]
+    avg_duration_ms = conn.execute("SELECT COALESCE(AVG(duration_ms),0) as v FROM logs WHERE duration_ms IS NOT NULL").fetchone()["v"]
     active_accounts = conn.execute("SELECT COUNT(*) as c FROM accounts WHERE status='active'").fetchone()["c"]
+    total_accounts = conn.execute("SELECT COUNT(*) as c FROM accounts").fetchone()["c"]
     active_keys = conn.execute("SELECT COUNT(*) as c FROM api_keys WHERE status='active'").fetchone()["c"]
+    total_keys = conn.execute("SELECT COUNT(*) as c FROM api_keys").fetchone()["c"]
+
+    today_start = _today_start_ts()
+    today = conn.execute("""
+        SELECT COUNT(*) as requests,
+               COALESCE(SUM(total_tokens),0) as tokens,
+               COALESCE(SUM(credit),0) as credit,
+               COALESCE(AVG(duration_ms),0) as avg_duration_ms
+        FROM logs WHERE created_at >= ?
+    """, (today_start,)).fetchone()
+    today_success = conn.execute("""
+        SELECT COUNT(*) as c FROM logs
+        WHERE created_at >= ?
+          AND status_code BETWEEN 200 AND 299
+          AND finish_reason NOT IN ('error', 'content_filter')
+    """, (today_start,)).fetchone()["c"]
+    today_errors = conn.execute("""
+        SELECT COUNT(*) as c FROM logs
+        WHERE created_at >= ? AND (status_code < 200 OR status_code >= 300 OR finish_reason='error')
+    """, (today_start,)).fetchone()["c"]
+    today_filtered = conn.execute(
+        "SELECT COUNT(*) as c FROM logs WHERE created_at >= ? AND finish_reason='content_filter'",
+        (today_start,),
+    ).fetchone()["c"]
 
     # 最近 7 天每日统计
     seven_days_ago = int(time.time()) - 7 * 86400
@@ -451,8 +484,32 @@ def get_stats() -> dict:
 
     # 模型使用统计
     model_stats = conn.execute("""
-        SELECT model, COUNT(*) as count, COALESCE(SUM(total_tokens),0) as tokens
+        SELECT model, COUNT(*) as count, COALESCE(SUM(total_tokens),0) as tokens,
+               COALESCE(SUM(credit),0) as credit,
+               COALESCE(AVG(duration_ms),0) as avg_duration_ms
         FROM logs GROUP BY model ORDER BY count DESC LIMIT 10
+    """).fetchall()
+
+    key_stats = conn.execute("""
+        SELECT api_key_name as name, COUNT(*) as count, COALESCE(SUM(total_tokens),0) as tokens,
+               COALESCE(SUM(credit),0) as credit, MAX(created_at) as last_used_at
+        FROM logs
+        WHERE api_key_id IS NOT NULL
+        GROUP BY api_key_id, api_key_name
+        ORDER BY count DESC LIMIT 5
+    """).fetchall()
+
+    account_stats = conn.execute("""
+        SELECT id, name, nickname, status, total_requests, total_tokens, total_credits, last_used_at
+        FROM accounts
+        ORDER BY status='active' DESC, total_requests DESC, id ASC
+        LIMIT 5
+    """).fetchall()
+
+    recent_logs = conn.execute("""
+        SELECT id, api_key_name, account_name, model, stream, total_tokens, credit,
+               finish_reason, duration_ms, status_code, error_msg, created_at
+        FROM logs ORDER BY id DESC LIMIT 8
     """).fetchall()
 
     conn.close()
@@ -460,10 +517,30 @@ def get_stats() -> dict:
         "total_requests": total_requests,
         "total_tokens": total_tokens,
         "total_credit": round(total_credit, 4),
+        "success_requests": success_requests,
+        "error_requests": error_requests,
+        "filtered_requests": filtered_requests,
+        "success_rate": round((success_requests / total_requests * 100) if total_requests else 0, 2),
+        "avg_duration_ms": int(avg_duration_ms or 0),
+        "today": {
+            "requests": int(today["requests"] or 0),
+            "tokens": int(today["tokens"] or 0),
+            "credit": round(float(today["credit"] or 0), 4),
+            "success": int(today_success or 0),
+            "errors": int(today_errors or 0),
+            "filtered": int(today_filtered or 0),
+            "success_rate": round((today_success / today["requests"] * 100) if today["requests"] else 0, 2),
+            "avg_duration_ms": int(today["avg_duration_ms"] or 0),
+        },
         "active_accounts": active_accounts,
+        "total_accounts": total_accounts,
         "active_keys": active_keys,
+        "total_keys": total_keys,
         "daily": [dict(r) for r in daily],
         "model_stats": [dict(r) for r in model_stats],
+        "key_stats": [dict(r) for r in key_stats],
+        "account_stats": [dict(r) for r in account_stats],
+        "recent_logs": [dict(r) for r in recent_logs],
     }
 
 
