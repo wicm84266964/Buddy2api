@@ -153,6 +153,12 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .testbox{border:1px solid var(--border);border-radius:4px;background:var(--input);padding:10px;font-size:12px;line-height:1.6}
 .testbox .row{display:flex;justify-content:space-between;gap:12px;margin-bottom:5px}
 .testbox .msg{font-family:var(--mono);white-space:pre-wrap;word-break:break-word;margin-top:8px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px}
+.form-grid .field{margin-bottom:0}
+.info-list{display:grid;gap:10px}
+.info-row{display:grid;grid-template-columns:130px 1fr auto;gap:10px;align-items:center}
+.info-row .k{font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px}
+.info-row .v{font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border2);border-radius:4px;padding:6px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn:disabled:hover{background:var(--bg);border-color:var(--border)}
 
@@ -204,7 +210,7 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .tag.warn{background:#fff8e8;color:#9a6a00}
 @media (max-width:900px){
   .side{position:static;width:100%;height:auto}.layout{display:block}.main{margin-left:0}.content{padding:18px;max-width:none}
-  .stats,.dash-grid,.dash-grid.wide,.dash-grid.thirds,.dash-hero,.detect-grid,.detect-custom{grid-template-columns:1fr}
+  .stats,.dash-grid,.dash-grid.wide,.dash-grid.thirds,.dash-hero,.detect-grid,.detect-custom,.form-grid,.info-row{grid-template-columns:1fr}
   .metric-row,.health-kpis{grid-template-columns:1fr}
   .detect-summary{display:block}.detect-actions{justify-content:flex-start;margin-top:10px}
 }
@@ -563,30 +569,60 @@ createApp({
   <div class="card card-p empty" v-else><div class="em">📋</div><p>暂无记录</p></div>
 </div>`
 }).component('stgs',{props:['token','toast'],setup(p){
-  const s=ref({}),ld=ref(true),saving=ref(false);
-  async function load(){ld.value=true;try{s.value=await api.get('/admin/settings',p.token)}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
-  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',s.value,p.token);p.toast('已保存')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
-  onMounted(load);return{s,ld,saving,load,save,I}
+  const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,base_url:'http://127.0.0.1:8787/v1',admin_auth:'本机 Cookie 自动验证',data_file:'codebuddy_gateway.db'};
+  const s=ref({...defaults}),stats=ref(null),ld=ref(true),saving=ref(false),copied=ref('');
+  async function load(){ld.value=true;try{const cfg=await api.get('/admin/settings',p.token);s.value={...defaults,...cfg};stats.value=await api.get('/admin/stats',p.token)}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
+  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',{backend_url:s.value.backend_url,default_domain:s.value.default_domain,timeout:Number(s.value.timeout)||300},p.token);p.toast('已保存')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
+  function resetDefaults(){s.value={...s.value,backend_url:defaults.backend_url,default_domain:defaults.default_domain,timeout:defaults.timeout};p.toast('已恢复默认','info')}
+  function copy(v,name){navigator.clipboard.writeText(v);copied.value=name;p.toast('已复制','info');setTimeout(()=>copied.value='',1200)}
+  function n(v){return Number(v||0).toLocaleString()}
+  onMounted(load);return{s,stats,ld,saving,copied,load,save,resetDefaults,copy,n,I}
 },template:`
 <div>
-  <div class="phead"><h1>设置</h1><p>系统配置</p></div>
-  <div class="tbar"><button class="btn s pri" @click="save" :disabled="saving||ld">{{saving?'保存中':'保存'}}</button><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button></div>
+  <div class="phead"><h1>设置</h1><p>运行配置、接入信息和本机维护</p></div>
+  <div class="tbar"><button class="btn s pri" @click="save" :disabled="saving||ld">{{saving?'保存中':'保存配置'}}</button><button class="btn s" @click="resetDefaults" :disabled="saving||ld">恢复默认</button><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
-  <div class="card card-p" v-else><div style="font-weight:600;font-size:13px;margin-bottom:14px">系统设置</div>
-    <div class="field"><label>后端地址</label><input v-model="s.backend_url" placeholder="https://copilot.tencent.com"/></div>
-    <div class="field"><label>默认域名</label><input v-model="s.default_domain" placeholder="www.codebuddy.cn"/></div>
-    <div class="field"><label>超时（秒）</label><input v-model="s.timeout" type="number" placeholder="300"/></div>
-  </div>
-  <div class="card card-p" style="margin-top:16px"><div style="font-weight:600;font-size:13px;margin-bottom:10px">快速接入</div>
-    <div class="codeblk"><span class="k"># OpenAI 兼容</span>
-Base URL: <span class="s">http://127.0.0.1:8787/v1</span>
-API Key:  <span class="s">API Keys 页面创建</span>
+  <template v-else>
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-h">后端参数<span class="sub">保存后对后续请求生效</span></div>
+        <div class="card-p form-grid">
+          <div class="field"><label>后端地址</label><input v-model="s.backend_url" placeholder="https://copilot.tencent.com"/><div class="hint">上游 Work Buddy 服务地址。</div></div>
+          <div class="field"><label>默认域名</label><input v-model="s.default_domain" placeholder="www.codebuddy.cn"/><div class="hint">账号 auth 中没有 domain 时使用。</div></div>
+          <div class="field"><label>请求超时（秒）</label><input v-model="s.timeout" type="number" min="30" max="900" placeholder="300"/><div class="hint">长上下文或慢模型建议保持 300。</div></div>
+          <div class="field"><label>管理鉴权</label><input v-model="s.admin_auth" disabled/><div class="hint">本机 Web UI 自动使用 HttpOnly Cookie。</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h">运行状态<span class="sub">当前实例</span></div>
+        <div class="card-p">
+          <div class="metric-row">
+            <div class="metric"><div class="m-label">账号</div><div class="m-value">{{stats?.active_accounts||0}}/{{stats?.total_accounts||0}}</div><div class="m-sub">active / total</div></div>
+            <div class="metric"><div class="m-label">API Keys</div><div class="m-value">{{stats?.active_keys||0}}/{{stats?.total_keys||0}}</div><div class="m-sub">active / total</div></div>
+            <div class="metric"><div class="m-label">请求</div><div class="m-value">{{n(stats?.total_requests)}}</div><div class="m-sub">all time</div></div>
+          </div>
+          <div class="status-line" style="margin-top:12px"><span class="badge" :class="stats?.active_accounts?'ok':'err'">Accounts</span><span class="badge" :class="stats?.active_keys?'ok':'err'">Keys</span><span class="tag">Timeout {{s.timeout}}s</span></div>
+        </div>
+      </div>
+    </div>
 
-<span class="k"># curl</span>
-curl http://127.0.0.1:8787/v1/chat/completions \\
+    <div class="card">
+      <div class="card-h">接入信息<span class="sub">OpenAI Compatible</span></div>
+      <div class="card-p info-list">
+        <div class="info-row"><div class="k">Base URL</div><div class="v">{{s.base_url}}</div><button class="btn s" @click="copy(s.base_url,'base')">{{copied==='base'?'已复制':'复制'}}</button></div>
+        <div class="info-row"><div class="k">API Key</div><div class="v">在 API Keys 页面创建 sk-cb-...</div><span class="tag">Bearer</span></div>
+        <div class="info-row"><div class="k">Models</div><div class="v">auto, glm-5.2, kimi-k2.7, deepseek-v4-pro</div><button class="btn s" @click="copy('auto','model')">{{copied==='model'?'已复制':'复制'}}</button></div>
+        <div class="info-row"><div class="k">Database</div><div class="v">{{s.data_file}}</div><span class="tag">SQLite</span></div>
+      </div>
+    </div>
+
+    <div class="card card-p"><div style="font-weight:600;font-size:13px;margin-bottom:10px">快速验证</div>
+      <div class="codeblk"><span class="k">curl</span> {{s.base_url}}/chat/completions \\
   -H <span class="s">"Authorization: Bearer YOUR_KEY"</span> \\
+  -H <span class="s">"Content-Type: application/json"</span> \\
   -d <span class="s">'{"model":"auto","messages":[{"role":"user","content":"hi"}]}'</span></div>
-  </div>
+    </div>
+  </template>
 </div>`
 }).mount('#app');
 </script>
