@@ -168,8 +168,12 @@ def _safe_auth_file_meta(path: Path, existing_uids: set[str]) -> dict:
 
 def discover_auth_files(auth_dir: Optional[str] = None) -> dict:
     """返回本机 auth 文件的安全元信息，不返回任何 token 内容。"""
+    candidates = candidate_auth_dirs(auth_dir)
+    existing_dirs = [d for d in candidates if d.is_dir()]
+    visible_dirs = existing_dirs or candidates
+
     dirs = []
-    for d in candidate_auth_dirs(auth_dir):
+    for d in visible_dirs:
         info_files = []
         exists = d.is_dir()
         if exists:
