@@ -3,7 +3,7 @@ cd "$(dirname "$0")"
 
 echo ""
 echo "  ========================================"
-echo "   CodeBuddy Gateway"
+echo "   Buddy 2 API"
 echo "  ========================================"
 echo ""
 

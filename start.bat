@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 >nul 2>&1
-title CodeBuddy Gateway
+title Buddy 2 API
 
 cd /d "%~dp0"
 
 echo.
 echo  ========================================
-echo   CodeBuddy Gateway
+echo   Buddy 2 API
 echo  ========================================
 echo.
 

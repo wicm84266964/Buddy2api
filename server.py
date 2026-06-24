@@ -1,5 +1,5 @@
 """
-server.py — CodeBuddy Gateway 主服务
+server.py — Buddy 2 API 主服务
 
 FastAPI 应用，包含：
   - /v1/chat/completions  代理端点（OpenAI 兼容）
@@ -24,7 +24,7 @@ import database as db
 import auth_manager
 import proxy
 
-app = FastAPI(title="CodeBuddy Gateway", version="1.0")
+app = FastAPI(title="Buddy 2 API", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -109,7 +109,7 @@ async def list_models():
     return {
         "object": "list",
         "data": [
-            {"id": m["id"], "object": "model", "created": 0, "owned_by": "codebuddy"}
+            {"id": m["id"], "object": "model", "created": 0, "owned_by": "buddy2api"}
             for m in models
         ],
     }
@@ -386,7 +386,7 @@ async def index():
 def main():
     global ADMIN_TOKEN, ALLOW_NO_ADMIN_AUTH
 
-    ap = argparse.ArgumentParser(description="CodeBuddy Gateway")
+    ap = argparse.ArgumentParser(description="Buddy 2 API")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--admin-token", default=os.environ.get("CB_GATEWAY_ADMIN_TOKEN", ""),
@@ -409,7 +409,7 @@ def main():
 
     accounts = db.list_accounts()
     sys.stderr.write(f"\n")
-    sys.stderr.write(f"  CodeBuddy Gateway v1.0\n")
+    sys.stderr.write(f"  Buddy 2 API v1.0\n")
     sys.stderr.write(f"  ========================\n")
     sys.stderr.write(f"  监听: http://{args.host}:{args.port}\n")
     sys.stderr.write(f"  账号: {len(accounts)} 个 ({sum(1 for a in accounts if a['status']=='active')} active)\n")

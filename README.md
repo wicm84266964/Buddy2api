@@ -1,6 +1,6 @@
-# CodeBuddy Gateway
+# Buddy 2 API
 
-> 将 WorkBuddy / CodeBuddy 订阅转换为标准 OpenAI 兼容 API，带 Web 管理界面。
+> 将桌面端 AI 编程助手订阅转换为标准 OpenAI 兼容 API，带 Web 管理界面。
 
 ## 功能
 
@@ -12,6 +12,7 @@
 - **Function Calling**：原生 `tools` / `tool_calls` 透传
 - **请求日志**：Token 消耗、Credit、耗时、状态码
 - **基础限额**：API Key 可设置每日请求次数上限
+- **模型别名**：内置常用别名（gpt-4o、claude-3.5-sonnet 等），支持自定义扩展
 
 ## 快速开始
 
@@ -50,13 +51,13 @@ chmod +x start.sh
 docker-compose up -d
 ```
 
-Docker 默认使用 `CB_GATEWAY_DB_PATH=/app/data/codebuddy_gateway.db`，数据库保存在宿主机 `./data/`。
+Docker 默认使用 `CB_GATEWAY_DB_PATH=/app/data/buddy2api.db`，数据库保存在宿主机 `./data/`。
 
 打开浏览器访问 `http://127.0.0.1:8787`
 
 ## 前提条件
 
-1. 已安装 WorkBuddy / CodeBuddy 桌面客户端
+1. 已安装桌面端 AI 编程助手客户端
 2. 桌面端已登录账号
 
 启动时自动扫描本机 auth 文件导入账号。
@@ -77,7 +78,7 @@ Docker 默认使用 `CB_GATEWAY_DB_PATH=/app/data/codebuddy_gateway.db`，数据
 |---|---|
 | `CB_GATEWAY_ADMIN_TOKEN` | 固定管理后台 Token |
 | `CB_GATEWAY_DB_PATH` | SQLite 数据库路径 |
-| `CB_AUTH_DIR` | 指定 WorkBuddy/CodeBuddy auth 文件目录，适合 Docker 挂载 |
+| `CB_AUTH_DIR` | 指定 auth 文件目录，适合 Docker 挂载 |
 
 ## 客户端接入
 
@@ -89,6 +90,8 @@ Docker 默认使用 `CB_GATEWAY_DB_PATH=/app/data/codebuddy_gateway.db`，数据
 | API Key | Web UI「API Keys」页面创建 |
 | Model | `auto` / `glm-5.2` / `kimi-k2.7` / `deepseek-v4-pro` 等 |
 | Stream | 建议开启 |
+
+支持模型别名映射：`gpt-4o` → `glm-5.2`、`claude-3.5-sonnet` → `deepseek-v4-pro` 等。
 
 ### curl
 
@@ -109,7 +112,7 @@ curl -N http://127.0.0.1:8787/v1/chat/completions \
 curl http://127.0.0.1:8787/v1/models
 ```
 
-API Key 完整值只在创建时返回一次，之后列表只显示前缀。请创建后立即填入 OpenClaw。
+API Key 完整值只在创建时返回一次，之后列表只显示前缀。请创建后立即填入客户端。
 
 ## API 文档
 
@@ -139,6 +142,7 @@ API Key 完整值只在创建时返回一次，之后列表只显示前缀。请
 | `/admin/logs` | GET | 请求日志 |
 | `/admin/settings` | GET/PUT | 系统设置 |
 | `/admin/models` | GET/PUT | 模型配置 |
+| `/admin/aliases` | GET/PUT | 模型别名 |
 
 ## 可用模型
 
@@ -159,7 +163,7 @@ API Key 完整值只在创建时返回一次，之后列表只显示前缀。请
 ## 文件结构
 
 ```
-codebuddy-gateway/
+buddy2api/
 ├── server.py           # FastAPI 主服务
 ├── proxy.py            # 请求代理转发
 ├── auth_manager.py     # 多账号管理
@@ -185,13 +189,6 @@ codebuddy-gateway/
 - **额度按 Token 计**：usage 中 `credit` 字段为腾讯计费单位
 - **不要设太小的 max_tokens**：reasoning 会占用配额导致 content 为空
 - **多账号轮询**：导入多个账号后自动按最少使用优先分发
-
-## 开机自启（Windows 计划任务）
-
-```powershell
-# 创建计划任务，开机自动启动
-schtasks /create /tn "CodeBuddyGateway" /tr "pythonw C:\path\to\codebuddy-gateway\server.py" /sc onlogon /rl highest
-```
 
 ## License
 
