@@ -10,9 +10,9 @@ services:
       # 持久化数据库
       - ./data:/app/data
       # 挂载宿主机 auth 文件（Windows 路径按需修改）
-      # - /c/Users/YUNWU/AppData/Local/CodeBuddyExtension/Data/Public/auth:/auth:ro
+      # - /c/Users/<YOUR_NAME>/AppData/Local/CodeBuddyExtension/Data/Public/auth:/auth:ro
     environment:
-      - CB_GATEWAY_ADMIN_TOKEN=change-me
+      - CB_GATEWAY_ADMIN_TOKEN=change-this-token
       - CB_GATEWAY_DB_PATH=/app/data/buddy2api.db
       # - CB_AUTH_DIR=/auth
     restart: unless-stopped
