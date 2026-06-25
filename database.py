@@ -79,6 +79,7 @@ def init_db():
             status          TEXT DEFAULT 'active',
             weight          INTEGER DEFAULT 1,
             priority        INTEGER DEFAULT 0,
+            credit_limit    REAL DEFAULT 0,
             last_used_at    INTEGER,
             total_requests  INTEGER DEFAULT 0,
             total_tokens    INTEGER DEFAULT 0,
@@ -142,8 +143,11 @@ def _migrate_accounts(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE accounts ADD COLUMN weight INTEGER DEFAULT 1")
     if "priority" not in cols:
         conn.execute("ALTER TABLE accounts ADD COLUMN priority INTEGER DEFAULT 0")
+    if "credit_limit" not in cols:
+        conn.execute("ALTER TABLE accounts ADD COLUMN credit_limit REAL DEFAULT 0")
     conn.execute("UPDATE accounts SET weight=1 WHERE weight IS NULL OR weight < 1")
     conn.execute("UPDATE accounts SET priority=0 WHERE priority IS NULL")
+    conn.execute("UPDATE accounts SET credit_limit=0 WHERE credit_limit IS NULL OR credit_limit < 0")
 
 
 def _migrate_api_keys(conn: sqlite3.Connection):
@@ -207,14 +211,15 @@ def add_account(data: dict) -> int:
     now = int(time.time())
     weight = max(1, int(data.get("weight", 1) or 1))
     priority = int(data.get("priority", 0) or 0)
+    credit_limit = max(0.0, float(data.get("credit_limit", 0) or 0))
     with _lock:
         conn = get_conn()
         cur = conn.execute("""
             INSERT INTO accounts
                 (name, uid, nickname, phone, account_type, access_token, refresh_token,
                  expires_at, refresh_expires_at, domain, enterprise_id, session_state,
-                 status, weight, priority, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 status, weight, priority, credit_limit, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("name", ""),
             data.get("uid", ""),
@@ -231,6 +236,7 @@ def add_account(data: dict) -> int:
             data.get("status", "active"),
             weight,
             priority,
+            credit_limit,
             now, now,
         ))
         aid = cur.lastrowid
@@ -245,12 +251,15 @@ def update_account(aid: int, data: dict):
     values = []
     for k in ["name", "uid", "nickname", "phone", "account_type", "access_token",
               "refresh_token", "expires_at", "refresh_expires_at", "domain",
-              "enterprise_id", "session_state", "status", "weight", "priority"]:
+              "enterprise_id", "session_state", "status", "weight", "priority",
+              "credit_limit"]:
         if k in data:
             if k == "weight":
                 data[k] = max(1, int(data[k] or 1))
             elif k == "priority":
                 data[k] = int(data[k] or 0)
+            elif k == "credit_limit":
+                data[k] = max(0.0, float(data[k] or 0))
             fields.append(f"{k}=?")
             values.append(data[k])
     if not fields:

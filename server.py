@@ -196,6 +196,7 @@ async def admin_list_accounts(authorization: str | None = Header(default=None)):
         s["domain"] = a.get("domain", "")
         s["weight"] = int(a.get("weight") or 1)
         s["priority"] = int(a.get("priority") or 0)
+        s["credit_limit"] = float(a.get("credit_limit") or 0)
         result.append(s)
     return result
 
@@ -261,7 +262,7 @@ async def admin_update_account(
 ):
     _check_admin(authorization)
     data = await request.json()
-    allowed = {"name", "status", "weight", "priority"}
+    allowed = {"name", "status", "weight", "priority", "credit_limit"}
     update_data = {k: data[k] for k in allowed if k in data}
     if "status" in update_data and update_data["status"] not in {"active", "inactive", "expired"}:
         raise HTTPException(status_code=400, detail="Invalid account status")

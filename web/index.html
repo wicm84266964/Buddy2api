@@ -148,7 +148,14 @@ badge,.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;bord
 .detect-custom input:focus{border-color:var(--blue);background:#fff}
 .detect-files{margin-top:12px}
 .numctl{width:64px;padding:5px 7px;border:1px solid var(--border);border-radius:4px;font:inherit;font-size:12px;background:var(--input)}
+.numctl.credit{width:76px}
 .numctl:focus{border-color:var(--blue);background:#fff;outline:none}
+.credit-cell{min-width:138px}
+.credit-main{display:flex;align-items:center;gap:6px;justify-content:space-between}
+.credit-rem{font-weight:700;font-family:var(--mono);font-size:12px}
+.credit-rem.unset{font-weight:500;color:var(--fg3)}
+.credit-meta{font-size:11px;color:var(--fg3);margin-top:4px}
+.credit-cell .progress{margin-top:6px}
 .ops{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
 .testbox{border:1px solid var(--border);border-radius:4px;background:var(--input);padding:10px;font-size:12px;line-height:1.6}
 .testbox .row{display:flex;justify-content:space-between;gap:12px;margin-bottom:5px}
@@ -402,8 +409,8 @@ createApp({
 </div>`
 }).component('accs',{props:['token','toast'],setup(p){
   const l=ref([]),ld=ref(true),sa=ref(false),ai=ref(''),nm=ref(''),disc=ref(null),dl=ref(false),scanning=ref(false),adding=ref(false),authPath=ref(''),test=ref(null),tl=ref(0),busy=ref({});
-  function hydrate(a){return {...a,_weight:a.weight||1,_priority:a.priority||0,_baseWeight:a.weight||1,_basePriority:a.priority||0}}
-  function dirty(a){return Number(a._weight||1)!==Number(a._baseWeight||1)||Number(a._priority||0)!==Number(a._basePriority||0)}
+  function hydrate(a){return {...a,_weight:a.weight||1,_priority:a.priority||0,_creditLimit:a.credit_limit||0,_baseWeight:a.weight||1,_basePriority:a.priority||0,_baseCreditLimit:a.credit_limit||0}}
+  function dirty(a){return Number(a._weight||1)!==Number(a._baseWeight||1)||Number(a._priority||0)!==Number(a._basePriority||0)||Number(a._creditLimit||0)!==Number(a._baseCreditLimit||0)}
   function busyKey(id,k){return busy.value[id+'-'+k]}
   async function load(){ld.value=true;try{l.value=(await api.get('/admin/accounts',p.token)).map(hydrate)}catch(e){p.toast(apiErr(e),'err')}ld.value=false}
   async function discover(path=''){dl.value=true;try{const q=path&&path.trim()?('?auth_dir='+encodeURIComponent(path.trim())):'';disc.value=await api.get('/admin/accounts/discover'+q,p.token)}catch(e){p.toast(apiErr(e,'检测失败'),'err')}dl.value=false}
@@ -412,14 +419,16 @@ createApp({
   async function add(){if(adding.value)return;if(!ai.value.trim()){p.toast('请先粘贴 Auth JSON','err');return}adding.value=true;try{const d=JSON.parse(ai.value);await api.post('/admin/accounts',{...d,name:nm.value},p.token);p.toast('添加成功');sa.value=false;ai.value='';nm.value='';await load();await discover(authPath.value)}catch(e){p.toast('失败:'+e.message,'err')}adding.value=false}
   async function withBusy(a,k,fn){busy.value={...busy.value,[a.id+'-'+k]:true};try{return await fn()}finally{const o={...busy.value};delete o[a.id+'-'+k];busy.value=o}}
   async function ref2(a){await withBusy(a,'refresh',async()=>{try{await api.post('/admin/accounts/'+a.id+'/refresh',{},p.token);p.toast('刷新成功');await load()}catch(e){p.toast(apiErr(e,'刷新失败'),'err')}})}
-  async function saveMeta(a){await withBusy(a,'save',async()=>{try{await api.put('/admin/accounts/'+a.id,{weight:parseInt(a._weight)||1,priority:parseInt(a._priority)||0},p.token);a._baseWeight=parseInt(a._weight)||1;a._basePriority=parseInt(a._priority)||0;p.toast('已保存');await load()}catch(e){p.toast(apiErr(e,'保存失败'),'err')}})}
+  async function saveMeta(a){await withBusy(a,'save',async()=>{try{const creditLimit=Math.max(0,Number(a._creditLimit)||0);await api.put('/admin/accounts/'+a.id,{weight:parseInt(a._weight)||1,priority:parseInt(a._priority)||0,credit_limit:creditLimit},p.token);a._baseWeight=parseInt(a._weight)||1;a._basePriority=parseInt(a._priority)||0;a._baseCreditLimit=creditLimit;p.toast('已保存');await load()}catch(e){p.toast(apiErr(e,'保存失败'),'err')}})}
   async function toggle(a){await withBusy(a,'toggle',async()=>{try{await api.put('/admin/accounts/'+a.id,{status:a.status==='active'?'inactive':'active'},p.token);p.toast(a.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast(apiErr(e,'操作失败'),'err')}})}
   async function testOne(a){tl.value=a.id;test.value=null;try{const r=await api.post('/admin/accounts/'+a.id+'/test',{model:'auto',prompt:'ping'},p.token);test.value={account:a.nickname||a.name,result:r};p.toast(r.ok?'测试成功':'测试失败',r.ok?'ok':'err');await load()}catch(e){p.toast(apiErr(e,'测试失败'),'err');test.value={account:a.nickname||a.name,result:{ok:false,status_code:0,message:e.message}}}tl.value=0}
   async function del(a){if(!confirm('删除账号 '+(a.nickname||a.name||a.id)+' ?'))return;await api.del('/admin/accounts/'+a.id,p.token);p.toast('已删除');await load();await discover(authPath.value)}
   function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}
   function size(v){v=Number(v||0);if(v>=1024*1024)return(v/1024/1024).toFixed(1)+' MB';if(v>=1024)return(v/1024).toFixed(1)+' KB';return v+' B'}
+  function credit(v){v=Number(v||0);return v.toLocaleString('zh-CN',{maximumFractionDigits:4})}
+  function creditPct(a){return Math.max(0,Math.min(100,Number(a.credit_used_pct||0)))+'%'}
   function clearPath(){authPath.value='';discover('')}
-  onMounted(()=>{load();discover()});return{l,ld,sa,ai,nm,disc,dl,scanning,adding,authPath,test,tl,busyKey,dirty,load,discover,scan,scanCustom,add,ref2,saveMeta,toggle,testOne,del,fmt,size,clearPath,I}
+  onMounted(()=>{load();discover()});return{l,ld,sa,ai,nm,disc,dl,scanning,adding,authPath,test,tl,busyKey,dirty,load,discover,scan,scanCustom,add,ref2,saveMeta,toggle,testOne,del,fmt,size,credit,creditPct,clearPath,I}
 },template:`
 <div>
   <div class="phead"><h1>账号管理</h1><p>多账号轮询 · 最少使用优先</p></div>
@@ -472,8 +481,8 @@ createApp({
   </div>
   <div class="tbar"><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新列表'}}</button><button class="btn s" @click="sa=true"><span v-html="I.plus"></span>高级手动添加</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个 · {{l.filter(a=>a.status==='active').length}}活跃</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
-  <div class="card" v-else-if="l.length"><table><thead><tr><th>账号</th><th>UID</th><th>状态</th><th>权重</th><th>优先级</th><th>剩余</th><th>请求</th><th>Token</th><th>Credit</th><th></th></tr></thead><tbody>
-    <tr v-for="a in l" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name}} <span class="tag warn" v-if="dirty(a)">未保存</span></td><td class="mono">{{a.uid?.slice(0,8)}}…</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td><input class="numctl" v-model.number="a._weight" type="number" min="1" max="100"/></td><td><input class="numctl" v-model.number="a._priority" type="number" min="-100" max="100"/></td><td>{{a.token_expired?'过期':a.remaining_hours+'h'}}</td><td>{{a.total_requests}}</td><td>{{a.total_tokens?.toLocaleString()}}</td><td>{{a.total_credits}}</td><td><div class="ops"><button class="btn s" @click="saveMeta(a)" :disabled="!dirty(a)||busyKey(a.id,'save')">{{busyKey(a.id,'save')?'保存中':'保存'}}</button><button class="btn s" @click="toggle(a)" :disabled="busyKey(a.id,'toggle')">{{busyKey(a.id,'toggle')?'处理中':(a.status==='active'?'禁用':'启用')}}</button><button class="btn s" @click="testOne(a)" :disabled="tl===a.id">{{tl===a.id?'测试中':'测试'}}</button><button class="btn s" @click="ref2(a)" :disabled="busyKey(a.id,'refresh')">{{busyKey(a.id,'refresh')?'刷新中':'刷新'}}</button><button class="btn s danger" @click="del(a)">删除</button></div></td></tr>
+  <div class="card" v-else-if="l.length"><div class="card-h">账号列表<span class="sub">额度为本地估算：总额度 - 已用 Credit</span></div><table><thead><tr><th>账号</th><th>UID</th><th>状态</th><th>权重</th><th>优先级</th><th>总额度</th><th>有效期</th><th>额度</th><th>请求</th><th>Token</th><th>已用</th><th></th></tr></thead><tbody>
+    <tr v-for="a in l" :key="a.id"><td style="font-weight:600">{{a.nickname||a.name}} <span class="tag warn" v-if="dirty(a)">未保存</span></td><td class="mono">{{a.uid?.slice(0,8)}}…</td><td><span class="badge" :class="a.status">{{a.status}}</span></td><td><input class="numctl" v-model.number="a._weight" type="number" min="1" max="100"/></td><td><input class="numctl" v-model.number="a._priority" type="number" min="-100" max="100"/></td><td><input class="numctl credit" v-model.number="a._creditLimit" type="number" min="0" step="0.01" placeholder="0"/></td><td>{{a.token_expired?'过期':a.remaining_hours+'h'}}</td><td class="credit-cell"><div class="credit-main"><span class="credit-rem" v-if="a.credit_limit>0">{{credit(a.credit_remaining)}}</span><span class="credit-rem unset" v-else>未设置</span><span class="tag">{{a.credit_limit>0?credit(a.credit_used_pct)+'%':'仅统计'}}</span></div><div class="progress" :class="{err:a.credit_limit>0&&a.credit_used_pct>=90,ok:a.credit_limit>0&&a.credit_used_pct<70}"><span :style="{width:creditPct(a)}"></span></div><div class="credit-meta">{{a.credit_limit>0?'剩余估算':'填写总额度后显示剩余'}}</div></td><td>{{a.total_requests}}</td><td>{{a.total_tokens?.toLocaleString()}}</td><td>{{credit(a.total_credits)}}</td><td><div class="ops"><button class="btn s" @click="saveMeta(a)" :disabled="!dirty(a)||busyKey(a.id,'save')">{{busyKey(a.id,'save')?'保存中':'保存'}}</button><button class="btn s" @click="toggle(a)" :disabled="busyKey(a.id,'toggle')">{{busyKey(a.id,'toggle')?'处理中':(a.status==='active'?'禁用':'启用')}}</button><button class="btn s" @click="testOne(a)" :disabled="tl===a.id">{{tl===a.id?'测试中':'测试'}}</button><button class="btn s" @click="ref2(a)" :disabled="busyKey(a.id,'refresh')">{{busyKey(a.id,'refresh')?'刷新中':'刷新'}}</button><button class="btn s danger" @click="del(a)">删除</button></div></td></tr>
   </tbody></table></div>
   <div class="card card-p empty" v-else><div class="em">🔌</div><p>暂无账号 · 先使用上方本机登录检测导入</p></div>
   <div class="ov" v-if="test" @click.self="test=null"><div class="modal"><div class="modal-h"><h3>账号测试 · {{test.account}}</h3><button class="x" @click="test=null">&times;</button></div><div class="modal-b"><div class="testbox"><div class="row"><span>状态</span><span><span class="badge" :class="test.result.ok?'ok':'err'">{{test.result.ok?'成功':'失败'}}</span></span></div><div class="row"><span>HTTP</span><span class="mono">{{test.result.status_code}}</span></div><div class="row"><span>耗时</span><span class="mono">{{test.result.duration_ms}}ms</span></div><div class="row" v-if="test.result.model"><span>模型</span><span class="mono">{{test.result.model}}</span></div><div class="row" v-if="test.result.usage"><span>Token</span><span class="mono">{{test.result.usage.total_tokens||0}}</span></div><div class="msg">{{test.result.message||'无返回内容'}}</div></div><div class="hint" style="margin-top:8px">测试会发送一次极短请求，并记录到请求日志。</div></div><div class="modal-f"><button class="btn pri" @click="test=null">关闭</button></div></div></div>
