@@ -262,10 +262,15 @@ async def admin_update_account(
 ):
     _check_admin(authorization)
     data = await request.json()
-    allowed = {"name", "status", "weight", "priority", "credit_limit"}
+    allowed = {"name", "status", "weight", "priority", "credit_limit", "credit_baseline"}
     update_data = {k: data[k] for k in allowed if k in data}
     if "status" in update_data and update_data["status"] not in {"active", "inactive", "expired"}:
         raise HTTPException(status_code=400, detail="Invalid account status")
+    if "credit_limit" in update_data and "credit_baseline" not in update_data:
+        account = db.get_account(aid)
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        update_data["credit_baseline"] = float(account.get("total_credits") or 0)
     db.update_account(aid, update_data)
     return {"status": "ok"}
 

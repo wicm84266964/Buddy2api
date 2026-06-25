@@ -415,13 +415,15 @@ def get_account_status(account: dict) -> dict:
     remaining_hours = 0
     if account.get("expires_at"):
         remaining_hours = max(0, int((account["expires_at"] - now_ms) / 1000 / 3600))
-    credit_limit = max(0.0, float(account.get("credit_limit") or 0))
+    credit_snapshot = max(0.0, float(account.get("credit_limit") or 0))
+    credit_baseline = max(0.0, float(account.get("credit_baseline") or 0))
     total_credits = round(float(account.get("total_credits") or 0), 4)
+    credit_since_snapshot = round(max(0.0, total_credits - credit_baseline), 4)
     credit_remaining = None
     credit_used_pct = 0
-    if credit_limit > 0:
-        credit_remaining = round(max(0.0, credit_limit - total_credits), 4)
-        credit_used_pct = min(100, round(total_credits / credit_limit * 100, 1))
+    if credit_snapshot > 0:
+        credit_remaining = round(max(0.0, credit_snapshot - credit_since_snapshot), 4)
+        credit_used_pct = min(100, round(credit_since_snapshot / credit_snapshot * 100, 1))
 
     return {
         "id": account["id"],
@@ -436,10 +438,13 @@ def get_account_status(account: dict) -> dict:
         "total_requests": account.get("total_requests", 0),
         "total_tokens": account.get("total_tokens", 0),
         "total_credits": total_credits,
-        "credit_limit": round(credit_limit, 4),
+        "credit_limit": round(credit_snapshot, 4),
+        "credit_snapshot": round(credit_snapshot, 4),
+        "credit_baseline": round(credit_baseline, 4),
+        "credit_since_snapshot": credit_since_snapshot,
         "credit_remaining": credit_remaining,
         "credit_used_pct": credit_used_pct,
-        "credit_source": "local_estimate" if credit_limit > 0 else "usage_only",
+        "credit_source": "local_snapshot" if credit_snapshot > 0 else "usage_only",
         "last_used_at": account.get("last_used_at"),
     }
 
