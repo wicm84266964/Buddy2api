@@ -17,12 +17,15 @@ This project is mainly for personal use and testing. Do not deploy publicly, do 
 - **OpenAI Compatible** - `/v1/chat/completions` and `/v1/models`
 - **Streaming Output** - SSE streaming and non-streaming aggregated responses
 - **Auto Import Accounts** - Scans Work Buddy / CodeBuddy auth files on startup
-- **Multi-Account Load Balancing** - Least-used-first routing with automatic failover
+- **Multi-Account Routing** - Priority, weight, and weighted-load routing with automatic failover
+- **Account Diagnostics** - Enable/disable accounts, set weight/priority, refresh tokens, and run single-account tests
+- **Balance Snapshots** - Enter the account's current remaining balance, then deduct only new `usage.credit` after that snapshot
 - **Token Auto-Refresh** - Automatically refreshes tokens before expiry
 - **API Key Management** - Create separate keys for OpenCode, Cherry Studio, etc.
 - **Secure Key Storage** - Only SHA-256 hashes stored; full key shown once at creation
 - **Model Permission Control** - Restrict keys to specific models
 - **Daily Request Limits** - Set per-key daily request caps
+- **Dashboard** - Health, request trend, model ranking, account status, key usage, and recent logs
 - **Web Management UI** - Manage accounts, keys, models, logs, and settings in browser
 - **Request Logging** - Records model, tokens, credit, duration, status codes, errors
 - **Function Calling Passthrough** - Native `tools` / `tool_calls` support
@@ -59,9 +62,9 @@ pip install fastapi "uvicorn[standard]" httpx
 python server.py
 ```
 
-The console will print an Admin Token on startup. Open Web UI and click "Set Token" in the bottom-left to enter it.
+For local browser access, the Web UI uses a same-origin HttpOnly admin cookie automatically. You usually do not need to paste the Admin Token manually.
 
-Recommended to set a fixed token:
+For remote access or cookie fallback cases, set a fixed admin token:
 
 ```powershell
 $env:CB_GATEWAY_ADMIN_TOKEN="change-this-token"
@@ -95,6 +98,8 @@ http://127.0.0.1:8787
 4. Create a key in the "API Keys" page for your client.
 5. Enter the Base URL and API Key in OpenCode, OpenClaw, Cherry Studio, NextChat, etc.
 
+To show an estimated remaining balance per account, enter the current remaining balance shown by Work Buddy in the account's "Current Balance" field and save. This is a local balance snapshot: only new `usage.credit` after saving is deducted, which fits daily credit-claim workflows.
+
 ## Client Setup
 
 | Field | Value |
@@ -103,6 +108,21 @@ http://127.0.0.1:8787
 | API Key | Create in Web UI → API Keys |
 | Model | `auto` / `glm-5.2` / `glm-5.1` / `kimi-k2.7` / `deepseek-v4-pro` / `deepseek-v4-flash` |
 | Stream | Recommended |
+
+Currently implemented OpenAI-compatible endpoints:
+
+```text
+/v1/chat/completions
+/v1/models
+```
+
+If your client lets you choose the API type, select **OpenAI Compatible / Chat Completions**. Clients that are hard-wired to `/v1/responses` are not supported yet.
+
+If the calling client runs inside Docker, `127.0.0.1` points to the container itself, not the Windows host. In that case the Base URL is usually:
+
+```text
+http://host.docker.internal:8787/v1
+```
 
 ### OpenCode Example
 
@@ -160,7 +180,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 |---|---|---|
 | `--host` | `127.0.0.1` | Listen address |
 | `--port` | `8787` | Listen port |
-| `--admin-token` | auto-generated | Admin API token |
+| `--admin-token` | auto-generated | Admin API token; local Web UI usually uses Cookie auth automatically |
 | `--no-admin-auth` | `false` | Disable admin auth, for local testing only |
 
 ## Environment Variables
