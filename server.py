@@ -317,6 +317,47 @@ async def admin_test_account(
     return await proxy.test_account_chat(account, model or "auto", prompt or "ping")
 
 
+@app.get("/admin/accounts/{aid}/checkin")
+async def admin_checkin_status(
+    aid: int,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    account = db.get_account(aid)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return auth_manager.fetch_checkin_status(account)
+
+
+@app.post("/admin/accounts/{aid}/checkin")
+async def admin_claim_checkin(
+    aid: int,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    account = db.get_account(aid)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return auth_manager.claim_daily_checkin(account)
+
+
+@app.post("/admin/accounts/checkin-all")
+async def admin_claim_all_checkin(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    accounts = [a for a in db.list_accounts() if a.get("status") == "active"]
+    results = []
+    for account in accounts:
+        results.append(auth_manager.claim_daily_checkin(account))
+    return {
+        "total": len(results),
+        "claimed": sum(1 for r in results if r.get("claimed")),
+        "already_claimed": sum(1 for r in results if r.get("already_claimed")),
+        "failed": sum(1 for r in results if not r.get("ok")),
+        "credit": round(sum(float(r.get("credit") or 0) for r in results if r.get("claimed")), 4),
+        "results": results,
+    }
+
+
 # --- API Keys ---
 
 @app.get("/admin/api-keys")

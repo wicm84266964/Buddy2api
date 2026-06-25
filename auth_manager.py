@@ -357,6 +357,139 @@ def get_valid_headers(account: dict) -> Optional[dict]:
 
 
 # ============================================================
+# 每日积分领取
+# ============================================================
+
+def _checkin_result(
+    account: dict,
+    *,
+    ok: bool,
+    status_code: int = 0,
+    message: str = "",
+    payload: Optional[dict] = None,
+    claimed: bool = False,
+    already_claimed: bool = False,
+) -> dict:
+    payload = payload or {}
+    credit = payload.get("credit", payload.get("today_credit", 0)) or 0
+    try:
+        credit = float(credit)
+    except (TypeError, ValueError):
+        credit = 0
+    return {
+        "account_id": account.get("id"),
+        "account_name": account.get("nickname") or account.get("name") or str(account.get("id")),
+        "ok": ok,
+        "claimed": claimed,
+        "already_claimed": already_claimed,
+        "status_code": status_code,
+        "message": message,
+        "credit": credit,
+        "active": payload.get("active"),
+        "today_checked_in": payload.get("today_checked_in"),
+        "today_credit": payload.get("today_credit"),
+        "streak_days": payload.get("streak_days"),
+        "is_streak_day": payload.get("is_streak_day"),
+    }
+
+
+def _unwrap_response(data: object) -> tuple[bool, str, dict]:
+    if not isinstance(data, dict):
+        return False, "响应不是 JSON 对象", {}
+    code = data.get("code")
+    msg = str(data.get("msg") or data.get("message") or "")
+    payload = data.get("data") if isinstance(data.get("data"), dict) else data
+    if code not in (None, 0):
+        return False, msg or f"code={code}", payload
+    return True, msg or "OK", payload
+
+
+def fetch_checkin_status(account: dict) -> dict:
+    """查询每日积分领取状态。只返回安全摘要，不返回凭据。"""
+    headers = get_valid_headers(account)
+    if not headers:
+        return _checkin_result(
+            account,
+            ok=False,
+            message="token refresh failed or account credentials are invalid",
+        )
+
+    try:
+        with httpx.Client(timeout=20) as c:
+            r = c.post(f"{BACKEND}/v2/billing/meter/checkin-activity-status", headers=headers, json={})
+            data = r.json()
+    except Exception as e:
+        return _checkin_result(account, ok=False, status_code=0, message=str(e)[:240])
+
+    ok, msg, payload = _unwrap_response(data)
+    if r.status_code < 200 or r.status_code >= 300:
+        ok = False
+    return _checkin_result(
+        account,
+        ok=ok,
+        status_code=r.status_code,
+        message=msg,
+        payload=payload,
+        already_claimed=bool(payload.get("today_checked_in")),
+    )
+
+
+def claim_daily_checkin(account: dict) -> dict:
+    """手动领取单个账号的每日积分。不会绕过验证或做自动定时。"""
+    status = fetch_checkin_status(account)
+    if not status.get("ok"):
+        return status
+    if status.get("active") is False:
+        status["ok"] = False
+        status["message"] = "活动当前不可用"
+        return status
+    if status.get("today_checked_in"):
+        status["already_claimed"] = True
+        status["message"] = "今日已领取"
+        return status
+
+    fresh = db.get_account(account["id"])
+    if not fresh:
+        return _checkin_result(account, ok=False, message="account not found")
+    headers = get_valid_headers(fresh)
+    if not headers:
+        return _checkin_result(
+            account,
+            ok=False,
+            message="token refresh failed or account credentials are invalid",
+        )
+
+    try:
+        with httpx.Client(timeout=30) as c:
+            r = c.post(f"{BACKEND}/v2/billing/meter/daily-checkin", headers=headers, json={})
+            data = r.json()
+    except Exception as e:
+        return _checkin_result(account, ok=False, status_code=0, message=str(e)[:240])
+
+    ok, msg, payload = _unwrap_response(data)
+    if r.status_code < 200 or r.status_code >= 300:
+        ok = False
+    credit = payload.get("credit", payload.get("today_credit", 0)) or 0
+    try:
+        credit = float(credit)
+    except (TypeError, ValueError):
+        credit = 0
+    claimed = bool(ok and credit > 0)
+    if claimed and float(fresh.get("credit_limit") or 0) > 0:
+        db.update_account(fresh["id"], {"credit_limit": float(fresh.get("credit_limit") or 0) + credit})
+
+    return _checkin_result(
+        account,
+        ok=ok,
+        status_code=r.status_code,
+        message=("领取成功" if claimed else msg),
+        payload=payload,
+        claimed=claimed,
+        already_claimed=bool(payload.get("today_checked_in")) and not claimed,
+    )
+
+
+# ============================================================
 # 账号轮换（负载均衡）
 # ============================================================
 

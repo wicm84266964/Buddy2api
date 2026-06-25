@@ -20,6 +20,7 @@ This project is mainly for personal use and testing. Do not deploy publicly, do 
 - **Multi-Account Routing** - Priority, weight, and weighted-load routing with automatic failover
 - **Account Diagnostics** - Enable/disable accounts, set weight/priority, refresh tokens, and run single-account tests
 - **Balance Snapshots** - Enter the account's current remaining balance, then deduct only new `usage.credit` after that snapshot
+- **Manual Daily Credit Claim** - Claim today's credits per account or for all enabled accounts from the Accounts page
 - **Token Auto-Refresh** - Automatically refreshes tokens before expiry
 - **API Key Management** - Create separate keys for OpenCode, Cherry Studio, etc.
 - **Secure Key Storage** - Only SHA-256 hashes stored; full key shown once at creation
@@ -99,6 +100,8 @@ http://127.0.0.1:8787
 5. Enter the Base URL and API Key in OpenCode, OpenClaw, Cherry Studio, NextChat, etc.
 
 To show an estimated remaining balance per account, enter the current remaining balance shown by Work Buddy in the account's "Current Balance" field and save. This is a local balance snapshot: only new `usage.credit` after saving is deducted, which fits daily credit-claim workflows.
+
+The Accounts page also provides manual daily credit claim actions. You can claim for one account or all enabled accounts. It does not run on a timer; if the upstream API reports already claimed, inactive campaign, or invalid account credentials, the UI shows that result directly.
 
 ## Client Setup
 
