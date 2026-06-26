@@ -127,9 +127,26 @@ def init_db():
             value TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS account_resource_cache (
+            account_id INTEGER PRIMARY KEY,
+            payload    TEXT NOT NULL,
+            updated_at INTEGER,
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS account_checkin_cache (
+            account_id   INTEGER PRIMARY KEY,
+            checkin_date TEXT,
+            payload      TEXT NOT NULL,
+            updated_at   INTEGER,
+            FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_logs_created ON logs(created_at);
         CREATE INDEX IF NOT EXISTS idx_logs_api_key ON logs(api_key_id);
         CREATE INDEX IF NOT EXISTS idx_logs_account ON logs(account_id);
+        CREATE INDEX IF NOT EXISTS idx_resource_cache_updated ON account_resource_cache(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_checkin_cache_date ON account_checkin_cache(checkin_date);
         """)
         _migrate_accounts(conn)
         _migrate_api_keys(conn)
@@ -288,6 +305,8 @@ def update_account(aid: int, data: dict):
 def delete_account(aid: int):
     with _lock:
         conn = get_conn()
+        conn.execute("DELETE FROM account_resource_cache WHERE account_id=?", (aid,))
+        conn.execute("DELETE FROM account_checkin_cache WHERE account_id=?", (aid,))
         conn.execute("DELETE FROM accounts WHERE id=?", (aid,))
         conn.commit()
         conn.close()
@@ -338,6 +357,97 @@ def account_increment_usage(aid: int, tokens: int, credit: float):
         """, (tokens, credit, now, now, aid))
         conn.commit()
         conn.close()
+
+
+# ============================================================
+# Account cache
+# ============================================================
+
+def upsert_account_resource_cache(account_id: int, payload: dict):
+    now = int(time.time())
+    safe_payload = dict(payload or {})
+    safe_payload["cached"] = False
+    safe_payload["stale"] = False
+    safe_payload["updated_at"] = int(safe_payload.get("updated_at") or now)
+    with _lock:
+        conn = get_conn()
+        conn.execute(
+            """
+            INSERT INTO account_resource_cache (account_id, payload, updated_at)
+            VALUES (?,?,?)
+            ON CONFLICT(account_id) DO UPDATE SET
+                payload=excluded.payload,
+                updated_at=excluded.updated_at
+            """,
+            (account_id, json.dumps(safe_payload, ensure_ascii=False), safe_payload["updated_at"]),
+        )
+        conn.commit()
+        conn.close()
+
+
+def get_account_resource_cache(account_id: int) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT payload, updated_at FROM account_resource_cache WHERE account_id=?",
+        (account_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    payload["cached"] = True
+    payload["cache_updated_at"] = int(row["updated_at"] or payload.get("updated_at") or 0)
+    payload["age_seconds"] = max(0, int(time.time()) - int(payload["cache_updated_at"] or 0))
+    return payload
+
+
+def upsert_account_checkin_cache(account_id: int, payload: dict):
+    now = int(time.time())
+    checkin_date = date.today().isoformat()
+    safe_payload = dict(payload or {})
+    safe_payload["cached"] = False
+    safe_payload["stale"] = False
+    safe_payload["updated_at"] = int(safe_payload.get("updated_at") or now)
+    with _lock:
+        conn = get_conn()
+        conn.execute(
+            """
+            INSERT INTO account_checkin_cache (account_id, checkin_date, payload, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(account_id) DO UPDATE SET
+                checkin_date=excluded.checkin_date,
+                payload=excluded.payload,
+                updated_at=excluded.updated_at
+            """,
+            (account_id, checkin_date, json.dumps(safe_payload, ensure_ascii=False), safe_payload["updated_at"]),
+        )
+        conn.commit()
+        conn.close()
+
+
+def get_account_checkin_cache(account_id: int, today_only: bool = True) -> Optional[dict]:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT checkin_date, payload, updated_at FROM account_checkin_cache WHERE account_id=?",
+        (account_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    if today_only and row["checkin_date"] != date.today().isoformat():
+        return None
+    try:
+        payload = json.loads(row["payload"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    payload["cached"] = True
+    payload["cache_date"] = row["checkin_date"]
+    payload["cache_updated_at"] = int(row["updated_at"] or payload.get("updated_at") or 0)
+    payload["age_seconds"] = max(0, int(time.time()) - int(payload["cache_updated_at"] or 0))
+    return payload
 
 
 # ============================================================
@@ -477,6 +587,73 @@ def list_logs(limit: int = 100, offset: int = 0) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def search_logs(filters: Optional[dict] = None) -> dict:
+    filters = filters or {}
+    limit = max(1, min(500, int(filters.get("limit") or 100)))
+    offset = max(0, int(filters.get("offset") or 0))
+    where = []
+    values: list[Any] = []
+
+    q = str(filters.get("q") or "").strip()
+    if q:
+        like = f"%{q}%"
+        where.append(
+            "(api_key_name LIKE ? OR account_name LIKE ? OR model LIKE ? OR finish_reason LIKE ? OR error_msg LIKE ?)"
+        )
+        values.extend([like, like, like, like, like])
+
+    status = str(filters.get("status") or "all").strip()
+    if status == "success":
+        where.append("status_code BETWEEN 200 AND 299 AND finish_reason NOT IN ('error', 'content_filter')")
+    elif status == "error":
+        where.append("(status_code < 200 OR status_code >= 300 OR finish_reason='error')")
+    elif status == "filtered":
+        where.append("finish_reason='content_filter'")
+
+    for key, col in (
+        ("api_key_id", "api_key_id"),
+        ("account_id", "account_id"),
+    ):
+        value = filters.get(key)
+        if value not in (None, "", "all"):
+            where.append(f"{col}=?")
+            values.append(int(value))
+
+    model = str(filters.get("model") or "").strip()
+    if model:
+        where.append("model=?")
+        values.append(model)
+
+    start = filters.get("start")
+    if start not in (None, "", "all"):
+        where.append("created_at>=?")
+        values.append(int(start))
+
+    end = filters.get("end")
+    if end not in (None, "", "all"):
+        where.append("created_at<=?")
+        values.append(int(end))
+
+    sql_where = (" WHERE " + " AND ".join(where)) if where else ""
+    conn = get_conn()
+    total = conn.execute(f"SELECT COUNT(*) AS c FROM logs{sql_where}", values).fetchone()["c"]
+    rows = conn.execute(
+        f"SELECT * FROM logs{sql_where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        [*values, limit, offset],
+    ).fetchall()
+    model_rows = conn.execute(
+        "SELECT DISTINCT model FROM logs WHERE model IS NOT NULL AND model!='' ORDER BY model LIMIT 200"
+    ).fetchall()
+    conn.close()
+    return {
+        "items": [dict(r) for r in rows],
+        "total": int(total or 0),
+        "limit": limit,
+        "offset": offset,
+        "models": [r["model"] for r in model_rows],
+    }
 
 
 def get_stats() -> dict:

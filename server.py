@@ -14,6 +14,7 @@ import contextvars
 import os
 import secrets
 import sys
+import time
 from pathlib import Path
 
 import uvicorn
@@ -25,7 +26,7 @@ import database as db
 import auth_manager
 import proxy
 
-app = FastAPI(title="Buddy 2 API", version="1.0")
+app = FastAPI(title="Buddy 2 API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -181,6 +182,66 @@ async def admin_stats(authorization: str | None = Header(default=None)):
     return db.get_stats()
 
 
+@app.get("/admin/credit-summary")
+async def admin_credit_summary(
+    force: int = 0,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    accounts = db.list_accounts()
+    active_accounts = [a for a in accounts if a.get("status") == "active"]
+    resources = []
+    for account in active_accounts:
+        resources.append(auth_manager.fetch_account_resources(account, force=bool(force)))
+
+    ok_resources = [r for r in resources if r.get("ok")]
+    total_balance = round(sum(float(r.get("total_dosage") or r.get("available_total") or 0) for r in ok_resources), 4)
+    expiring_7d_total = round(sum(float(r.get("expiring_7d_total") or 0) for r in ok_resources), 4)
+    expiring_30d_total = round(sum(float(r.get("expiring_30d_total") or 0) for r in ok_resources), 4)
+    package_count = sum(int(r.get("package_count") or 0) for r in ok_resources)
+    stale_count = sum(1 for r in resources if r.get("stale"))
+    failed_count = sum(1 for r in resources if not r.get("ok"))
+    now_ts = int(time.time())
+    low_accounts = []
+    expiring_accounts = []
+    for r in resources:
+        balance = float(r.get("total_dosage") or r.get("available_total") or 0)
+        row = {
+            "account_id": r.get("account_id"),
+            "account_name": r.get("account_name"),
+            "balance": round(balance, 4),
+            "expiring_30d_total": round(float(r.get("expiring_30d_total") or 0), 4),
+            "next_expire_time": r.get("next_expire_time") or "",
+            "next_expire_days": r.get("next_expire_days"),
+            "ok": bool(r.get("ok")),
+            "stale": bool(r.get("stale")),
+            "age_seconds": int(r.get("age_seconds") or 0),
+        }
+        if r.get("ok") and balance <= 300:
+            low_accounts.append(row)
+        if r.get("ok") and float(r.get("expiring_30d_total") or 0) > 0:
+            expiring_accounts.append(row)
+
+    low_accounts.sort(key=lambda x: (x["balance"], x["account_id"] or 0))
+    expiring_accounts.sort(key=lambda x: (x["next_expire_days"] if x["next_expire_days"] is not None else 9999, -x["expiring_30d_total"]))
+    return {
+        "ok": failed_count == 0,
+        "updated_at": now_ts,
+        "active_accounts": len(active_accounts),
+        "resource_accounts": len(resources),
+        "ok_accounts": len(ok_resources),
+        "failed_accounts": failed_count,
+        "stale_accounts": stale_count,
+        "total_balance": total_balance,
+        "expiring_7d_total": expiring_7d_total,
+        "expiring_30d_total": expiring_30d_total,
+        "package_count": package_count,
+        "low_accounts": low_accounts[:8],
+        "expiring_accounts": expiring_accounts[:8],
+        "accounts": resources,
+    }
+
+
 # --- Accounts ---
 
 @app.get("/admin/accounts")
@@ -317,16 +378,53 @@ async def admin_test_account(
     return await proxy.test_account_chat(account, model or "auto", prompt or "ping")
 
 
-@app.get("/admin/accounts/{aid}/checkin")
-async def admin_checkin_status(
+@app.get("/admin/accounts/{aid}/resources")
+async def admin_account_resources(
     aid: int,
+    force: int = 0,
     authorization: str | None = Header(default=None),
 ):
     _check_admin(authorization)
     account = db.get_account(aid)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    return auth_manager.fetch_checkin_status(account)
+    return auth_manager.fetch_account_resources(account, force=bool(force))
+
+
+@app.get("/admin/accounts/{aid}/checkin")
+async def admin_checkin_status(
+    aid: int,
+    force: int = 0,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    account = db.get_account(aid)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return auth_manager.fetch_checkin_status(account, force=bool(force))
+
+
+@app.get("/admin/accounts/checkin-status-all")
+async def admin_checkin_status_all(
+    force: int = 0,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    accounts = [a for a in db.list_accounts() if a.get("status") == "active"]
+    results = [
+        auth_manager.fetch_checkin_status(account, force=bool(force))
+        for account in accounts
+    ]
+    return {
+        "total": len(results),
+        "ok": sum(1 for r in results if r.get("ok")),
+        "claimed": sum(1 for r in results if r.get("claimed")),
+        "already_claimed": sum(1 for r in results if r.get("already_claimed") or r.get("today_checked_in")),
+        "available": sum(1 for r in results if r.get("ok") and not (r.get("already_claimed") or r.get("today_checked_in"))),
+        "failed": sum(1 for r in results if not r.get("ok")),
+        "stale": sum(1 for r in results if r.get("stale")),
+        "results": results,
+    }
 
 
 @app.post("/admin/accounts/{aid}/checkin")
@@ -338,7 +436,10 @@ async def admin_claim_checkin(
     account = db.get_account(aid)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    return auth_manager.claim_daily_checkin(account)
+    result = auth_manager.claim_daily_checkin(account)
+    if result.get("ok"):
+        result["resources"] = auth_manager.fetch_account_resources(account)
+    return result
 
 
 @app.post("/admin/accounts/checkin-all")
@@ -347,7 +448,10 @@ async def admin_claim_all_checkin(authorization: str | None = Header(default=Non
     accounts = [a for a in db.list_accounts() if a.get("status") == "active"]
     results = []
     for account in accounts:
-        results.append(auth_manager.claim_daily_checkin(account))
+        result = auth_manager.claim_daily_checkin(account)
+        if result.get("ok"):
+            result["resources"] = auth_manager.fetch_account_resources(account)
+        results.append(result)
     return {
         "total": len(results),
         "claimed": sum(1 for r in results if r.get("claimed")),
@@ -414,6 +518,29 @@ async def admin_logs(
 ):
     _check_admin(authorization)
     return db.list_logs(limit, offset)
+
+
+@app.get("/admin/logs/search")
+async def admin_logs_search(
+    q: str | None = None,
+    status: str = "all",
+    account_id: str | None = None,
+    api_key_id: str | None = None,
+    model: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    return db.search_logs({
+        "q": q or "",
+        "status": status,
+        "account_id": account_id,
+        "api_key_id": api_key_id,
+        "model": model or "",
+        "limit": limit,
+        "offset": offset,
+    })
 
 
 # --- Settings ---
@@ -524,7 +651,7 @@ def main():
 
     accounts = db.list_accounts()
     sys.stderr.write(f"\n")
-    sys.stderr.write(f"  Buddy 2 API v1.0\n")
+    sys.stderr.write(f"  Buddy 2 API v1.2.0\n")
     sys.stderr.write(f"  ========================\n")
     sys.stderr.write(f"  监听: http://{args.host}:{args.port}\n")
     sys.stderr.write(f"  账号: {len(accounts)} 个 ({sum(1 for a in accounts if a['status']=='active')} active)\n")

@@ -19,16 +19,18 @@ This project is mainly for personal use and testing. Do not deploy publicly, do 
 - **Auto Import Accounts** - Scans Work Buddy / CodeBuddy auth files on startup
 - **Multi-Account Routing** - Priority, weight, and weighted-load routing with automatic failover
 - **Account Diagnostics** - Enable/disable accounts, set weight/priority, refresh tokens, and run single-account tests
-- **Balance Snapshots** - Enter the account's current remaining balance, then deduct only new `usage.credit` after that snapshot
+- **Official Balance** - Accounts page can read official Work Buddy resource balance, credits expiring within 30 days, and package details
+- **Balance Snapshots** - Use a local current-balance snapshot as fallback when the official balance API is unavailable
 - **Manual Daily Credit Claim** - Claim today's credits per account or for all enabled accounts from the Accounts page
 - **Token Auto-Refresh** - Automatically refreshes tokens before expiry
 - **API Key Management** - Create separate keys for OpenCode, Cherry Studio, etc.
 - **Secure Key Storage** - Only SHA-256 hashes stored; full key shown once at creation
 - **Model Permission Control** - Restrict keys to specific models
 - **Daily Request Limits** - Set per-key daily request caps
-- **Dashboard** - Health, request trend, model ranking, account status, key usage, and recent logs
+- **Dashboard** - Health, official credit summary, expiry reminders, request trend, model ranking, account status, key usage, and recent logs
 - **Web Management UI** - Manage accounts, keys, models, logs, and settings in browser
-- **Request Logging** - Records model, tokens, credit, duration, status codes, errors
+- **Request Logging** - Records model, tokens, credit, duration, status codes, errors, with filtering, search, pagination, and details
+- **Client Setup Wizard** - Settings page presets for OpenCode / OpenClaw, sub2api Docker, Cherry Studio, NextChat, and curl
 - **Function Calling Passthrough** - Native `tools` / `tool_calls` support
 - **Model Aliases** - Built-in common aliases with custom extension support
 
@@ -99,7 +101,11 @@ http://127.0.0.1:8787
 4. Create a key in the "API Keys" page for your client.
 5. Enter the Base URL and API Key in OpenCode, OpenClaw, Cherry Studio, NextChat, etc.
 
-To show an estimated remaining balance per account, enter the current remaining balance shown by Work Buddy in the account's "Current Balance" field and save. This is a local balance snapshot: only new `usage.credit` after saving is deducted, which fits daily credit-claim workflows.
+The Accounts page prefers the official Work Buddy resource balance. It shows the official remaining balance, credits expiring within 30 days, and each credit package's cycle, remaining amount, used amount, and expiry time. The daily claimed 150 credits appear as official resource packages; the actual expiry time follows the upstream response and is usually about one month.
+
+Dashboard aggregates official balances across enabled accounts, credits expiring within 30 days, low-balance reminders, and stale-cache status. Official credit data uses a short local cache, so opening pages repeatedly does not spam the upstream API; manual refresh and successful claims force an update.
+
+If the official balance API is temporarily unavailable, you can still enter the current remaining balance shown by Work Buddy as a local snapshot. This is only a fallback estimate: only new `usage.credit` after saving is deducted.
 
 The Accounts page also provides manual daily credit claim actions. You can claim for one account or all enabled accounts. It does not run on a timer; if the upstream API reports already claimed, inactive campaign, or invalid account credentials, the UI shows that result directly.
 
@@ -126,6 +132,8 @@ If the calling client runs inside Docker, `127.0.0.1` points to the container it
 ```text
 http://host.docker.internal:8787/v1
 ```
+
+You can also copy common client presets directly from the Web UI "Settings" page.
 
 ### OpenCode Example
 

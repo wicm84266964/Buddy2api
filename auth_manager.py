@@ -14,6 +14,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -404,14 +405,293 @@ def _unwrap_response(data: object) -> tuple[bool, str, dict]:
     return True, msg or "OK", payload
 
 
-def fetch_checkin_status(account: dict) -> dict:
-    """查询每日积分领取状态。只返回安全摘要，不返回凭据。"""
+# ============================================================
+# 官方额度资源
+# ============================================================
+
+def _to_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_resource_time(value) -> tuple[int | None, str]:
+    """把官方资源时间统一为秒级时间戳和原始可读字符串。"""
+    if value in (None, "", 0, "0", "9999-99-99 99:99:99"):
+        return None, str(value or "")
+
+    if isinstance(value, (int, float)):
+        raw = float(value)
+        if raw > 10_000_000_000:
+            raw = raw / 1000
+        return int(raw), time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(raw))
+
+    text = str(value).strip()
+    if not text:
+        return None, ""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return int(dt.timestamp()), text
+        except ValueError:
+            continue
+    return None, text
+
+
+def _safe_resource_item(item: dict, now_ts: int) -> dict:
+    cycle_end_ts, cycle_end = _parse_resource_time(item.get("CycleEndTime"))
+    cycle_start_ts, cycle_start = _parse_resource_time(item.get("CycleStartTime"))
+    deduction_end_ts, deduction_end = _parse_resource_time(item.get("DeductionEndTime"))
+    deduction_start_ts, deduction_start = _parse_resource_time(item.get("DeductionStartTime"))
+    expired_ts, expired_time = _parse_resource_time(item.get("ExpiredTime"))
+
+    remain = _to_float(item.get("CapacityRemainPrecise"), _to_float(item.get("CapacityRemain")))
+    used = _to_float(item.get("CapacityUsedPrecise"), _to_float(item.get("CapacityUsed")))
+    size = _to_float(item.get("CapacitySizePrecise"), _to_float(item.get("CapacitySize")))
+    cycle_remain = _to_float(item.get("CycleCapacityRemainPrecise"), _to_float(item.get("CycleCapacityRemain")))
+    cycle_used = _to_float(item.get("CycleCapacityUsedPrecise"), _to_float(item.get("CycleCapacityUsed")))
+    cycle_size = _to_float(item.get("CycleCapacitySizePrecise"), _to_float(item.get("CycleCapacitySize"), size))
+    effective_remain = cycle_remain if cycle_remain > 0 or cycle_used > 0 else remain
+
+    expire_ts = expired_ts or deduction_end_ts or cycle_end_ts
+    days_to_expire = None
+    if expire_ts:
+        days_to_expire = int((expire_ts - now_ts) / 86400)
+
+    package_name = str(item.get("PackageName") or item.get("DealName") or item.get("ProductName") or "额度包")
+    product_name = str(item.get("ProductName") or item.get("SubProductName") or "")
+    status = _to_int(item.get("Status"))
+    is_expired = bool(expire_ts and expire_ts < now_ts)
+
+    return {
+        "package_name": package_name,
+        "product_name": product_name,
+        "package_type": str(item.get("PackageType") or ""),
+        "resource_type": str(item.get("ResourceType") or ""),
+        "capacity_unit": str(item.get("CapacityUnit") or item.get("OriginUnit") or "credit"),
+        "status": status,
+        "remaining": round(remain, 4),
+        "remaining_precise": round(effective_remain, 4),
+        "used": round(used, 4),
+        "size": round(size, 4),
+        "cycle_remaining": round(cycle_remain, 4),
+        "cycle_used": round(cycle_used, 4),
+        "cycle_size": round(cycle_size, 4),
+        "cycle_start": cycle_start,
+        "cycle_start_ts": cycle_start_ts,
+        "cycle_end": cycle_end,
+        "cycle_end_ts": cycle_end_ts,
+        "deduction_start": deduction_start,
+        "deduction_start_ts": deduction_start_ts,
+        "deduction_end": deduction_end,
+        "deduction_end_ts": deduction_end_ts,
+        "expired_time": expired_time,
+        "expired_ts": expired_ts,
+        "expire_ts": expire_ts,
+        "expire_time": expired_time or deduction_end or cycle_end,
+        "days_to_expire": days_to_expire,
+        "expired": is_expired,
+        "auto_renew": bool(_to_int(item.get("AutoRenewFlag"))),
+        "remain_cycles": _to_int(item.get("RemainCycles")),
+        "total_cycles": _to_int(item.get("TotalCycles")),
+    }
+
+
+def _resource_failure(
+    account: dict,
+    *,
+    message: str,
+    status_code: int = 0,
+    allow_stale: bool = True,
+) -> dict:
+    cached = db.get_account_resource_cache(account.get("id")) if allow_stale and account.get("id") else None
+    if cached:
+        cached["stale"] = True
+        cached["message"] = message
+        cached["status_code"] = status_code
+        return cached
+    return {
+        "ok": False,
+        "status_code": status_code,
+        "message": message,
+        "account_id": account.get("id"),
+        "account_name": account.get("nickname") or account.get("name") or str(account.get("id")),
+        "total_dosage": 0,
+        "resource_count": 0,
+        "package_count": 0,
+        "active_package_count": 0,
+        "expired_package_count": 0,
+        "expiring_package_count": 0,
+        "available_total": 0,
+        "expiring_7d_total": 0,
+        "expiring_30d_total": 0,
+        "next_expire_time": "",
+        "next_expire_ts": None,
+        "next_expire_amount": 0,
+        "next_expire_days": None,
+        "updated_at": int(time.time()),
+        "cached": False,
+        "stale": False,
+        "age_seconds": 0,
+        "packages": [],
+        "expiring_packages": [],
+    }
+
+
+def fetch_account_resources(
+    account: dict,
+    *,
+    force: bool = False,
+    max_age_seconds: int = 60,
+    allow_stale: bool = True,
+) -> dict:
+    """查询官方额度资源，只返回安全摘要和额度包明细。"""
+    if account.get("id") and not force:
+        cached = db.get_account_resource_cache(account["id"])
+        if cached and int(cached.get("age_seconds") or 0) <= max_age_seconds:
+            cached["stale"] = False
+            return cached
+
     headers = get_valid_headers(account)
     if not headers:
-        return _checkin_result(
+        return _resource_failure(
             account,
-            ok=False,
             message="token refresh failed or account credentials are invalid",
+            allow_stale=allow_stale,
+        )
+
+    try:
+        with httpx.Client(timeout=25) as c:
+            r = c.post(f"{BACKEND}/v2/billing/meter/get-user-resource", headers=headers, json={})
+            data = r.json()
+    except Exception as e:
+        return _resource_failure(
+            account,
+            message=str(e)[:240],
+            allow_stale=allow_stale,
+        )
+
+    ok, msg, payload = _unwrap_response(data)
+    if r.status_code < 200 or r.status_code >= 300:
+        ok = False
+
+    response = payload.get("Response") if isinstance(payload.get("Response"), dict) else {}
+    raw_data = response.get("Data") if isinstance(response.get("Data"), dict) else {}
+    raw_items = raw_data.get("Accounts") if isinstance(raw_data.get("Accounts"), list) else []
+    now_ts = int(time.time())
+    packages = [_safe_resource_item(x, now_ts) for x in raw_items if isinstance(x, dict)]
+    packages.sort(key=lambda x: (
+        x.get("expired", False),
+        x.get("expire_ts") or 9_999_999_999,
+        -float(x.get("remaining_precise") or 0),
+    ))
+
+    active_packages = [p for p in packages if not p.get("expired")]
+    expiring_packages = [
+        p for p in active_packages
+        if p.get("expire_ts") and 0 <= (p["expire_ts"] - now_ts) <= 7 * 86400
+        and float(p.get("remaining_precise") or 0) > 0
+    ]
+    expiring_30d_packages = [
+        p for p in active_packages
+        if p.get("expire_ts") and 0 <= (p["expire_ts"] - now_ts) <= 30 * 86400
+        and float(p.get("remaining_precise") or 0) > 0
+    ]
+    next_expiring = next(
+        (
+            p for p in active_packages
+            if p.get("expire_ts") and float(p.get("remaining_precise") or 0) > 0
+        ),
+        None,
+    )
+    expired_packages = [p for p in packages if p.get("expired")]
+
+    result = {
+        "ok": ok,
+        "status_code": r.status_code,
+        "message": msg,
+        "account_id": account.get("id"),
+        "account_name": account.get("nickname") or account.get("name") or str(account.get("id")),
+        "total_dosage": round(_to_float(raw_data.get("TotalDosage")), 4),
+        "resource_count": _to_int(raw_data.get("TotalCount"), len(packages)),
+        "package_count": len(packages),
+        "active_package_count": len(active_packages),
+        "expired_package_count": len(expired_packages),
+        "expiring_package_count": len(expiring_packages),
+        "available_total": round(sum(float(p.get("remaining_precise") or 0) for p in active_packages), 4),
+        "expiring_7d_total": round(sum(float(p.get("remaining_precise") or 0) for p in expiring_packages), 4),
+        "expiring_30d_total": round(sum(float(p.get("remaining_precise") or 0) for p in expiring_30d_packages), 4),
+        "next_expire_time": next_expiring.get("expire_time") if next_expiring else "",
+        "next_expire_ts": next_expiring.get("expire_ts") if next_expiring else None,
+        "next_expire_amount": round(float(next_expiring.get("remaining_precise") or 0), 4) if next_expiring else 0,
+        "next_expire_days": next_expiring.get("days_to_expire") if next_expiring else None,
+        "updated_at": now_ts,
+        "cached": False,
+        "stale": False,
+        "age_seconds": 0,
+        "packages": packages,
+        "expiring_packages": expiring_packages,
+    }
+    if ok and account.get("id"):
+        db.upsert_account_resource_cache(account["id"], result)
+    if not ok:
+        return _resource_failure(
+            account,
+            message=msg,
+            status_code=r.status_code,
+            allow_stale=allow_stale,
+        )
+    return result
+
+
+def _checkin_failure(
+    account: dict,
+    *,
+    message: str,
+    status_code: int = 0,
+    allow_stale: bool = True,
+) -> dict:
+    cached = db.get_account_checkin_cache(account.get("id")) if allow_stale and account.get("id") else None
+    if cached:
+        cached["stale"] = True
+        cached["message"] = message
+        cached["status_code"] = status_code
+        return cached
+    return _checkin_result(account, ok=False, status_code=status_code, message=message)
+
+
+def fetch_checkin_status(
+    account: dict,
+    *,
+    force: bool = False,
+    max_age_seconds: int = 300,
+    allow_stale: bool = True,
+) -> dict:
+    """查询每日积分领取状态。只返回安全摘要，不返回凭据。"""
+    if account.get("id") and not force:
+        cached = db.get_account_checkin_cache(account["id"])
+        if cached and int(cached.get("age_seconds") or 0) <= max_age_seconds:
+            cached["stale"] = False
+            return cached
+
+    headers = get_valid_headers(account)
+    if not headers:
+        return _checkin_failure(
+            account,
+            message="token refresh failed or account credentials are invalid",
+            allow_stale=allow_stale,
         )
 
     try:
@@ -419,12 +699,12 @@ def fetch_checkin_status(account: dict) -> dict:
             r = c.post(f"{BACKEND}/v2/billing/meter/checkin-activity-status", headers=headers, json={})
             data = r.json()
     except Exception as e:
-        return _checkin_result(account, ok=False, status_code=0, message=str(e)[:240])
+        return _checkin_failure(account, status_code=0, message=str(e)[:240], allow_stale=allow_stale)
 
     ok, msg, payload = _unwrap_response(data)
     if r.status_code < 200 or r.status_code >= 300:
         ok = False
-    return _checkin_result(
+    result = _checkin_result(
         account,
         ok=ok,
         status_code=r.status_code,
@@ -432,11 +712,20 @@ def fetch_checkin_status(account: dict) -> dict:
         payload=payload,
         already_claimed=bool(payload.get("today_checked_in")),
     )
+    result["updated_at"] = int(time.time())
+    result["cached"] = False
+    result["stale"] = False
+    result["age_seconds"] = 0
+    if ok and account.get("id"):
+        db.upsert_account_checkin_cache(account["id"], result)
+    if not ok:
+        return _checkin_failure(account, status_code=r.status_code, message=msg, allow_stale=allow_stale)
+    return result
 
 
 def claim_daily_checkin(account: dict) -> dict:
     """手动领取单个账号的每日积分。不会绕过验证或做自动定时。"""
-    status = fetch_checkin_status(account)
+    status = fetch_checkin_status(account, force=True, allow_stale=False)
     if not status.get("ok"):
         return status
     if status.get("active") is False:
@@ -478,7 +767,7 @@ def claim_daily_checkin(account: dict) -> dict:
     if claimed and float(fresh.get("credit_limit") or 0) > 0:
         db.update_account(fresh["id"], {"credit_limit": float(fresh.get("credit_limit") or 0) + credit})
 
-    return _checkin_result(
+    result = _checkin_result(
         account,
         ok=ok,
         status_code=r.status_code,
@@ -487,6 +776,13 @@ def claim_daily_checkin(account: dict) -> dict:
         claimed=claimed,
         already_claimed=bool(payload.get("today_checked_in")) and not claimed,
     )
+    result["updated_at"] = int(time.time())
+    result["cached"] = False
+    result["stale"] = False
+    result["age_seconds"] = 0
+    if ok and account.get("id"):
+        db.upsert_account_checkin_cache(account["id"], result)
+    return result
 
 
 # ============================================================
