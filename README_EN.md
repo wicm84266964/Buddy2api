@@ -83,6 +83,35 @@ chmod +x start.sh
 
 ### Docker
 
+On Windows Docker Desktop, use the helper script. It automatically finds the current Windows user's Work Buddy auth directory and mounts it into the container as read-only `/auth`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-docker-win.ps1
+```
+
+If you control Docker from WSL:
+
+```bash
+chmod +x start-docker-wsl.sh
+./start-docker-wsl.sh
+```
+
+Both scripts look for:
+
+```text
+C:\Users\<your username>\AppData\Local\CodeBuddyExtension\Data\Public\auth
+```
+
+Inside the container it appears as:
+
+```text
+/auth
+```
+
+So the Web UI "rescan / one-click import" flow can find accounts without manually pasting `.info` files.
+
+If you only want to start the service without mounting the Windows auth directory:
+
 ```bash
 docker-compose up -d
 ```
@@ -92,6 +121,8 @@ Open browser at:
 ```text
 http://127.0.0.1:8787
 ```
+
+Note: Docker containers cannot magically scan the Windows C drive. The auth directory must be mounted as a volume. The scripts automate that read-only mount.
 
 ## Usage Flow
 
@@ -201,6 +232,8 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `CB_GATEWAY_ADMIN_TOKEN` | Fixed admin token |
 | `CB_GATEWAY_DB_PATH` | SQLite database path |
 | `CB_AUTH_DIR` | Work Buddy / CodeBuddy auth file directory |
+| `CB_HOST_AUTH_DIR` | Host auth directory used by Docker helper scripts |
+| `CB_CONTAINER_AUTH_DIR` | Auth mount directory inside Docker, default `/auth` |
 
 ## Data and Security
 
@@ -221,7 +254,9 @@ buddy2api/
 ├── web/index.html      # Vue 3 Web UI
 ├── Dockerfile
 ├── docker-compose.yml
+├── docker-compose.windows.yml
 ├── start.bat / start.sh
+├── start-docker-win.ps1 / start-docker-wsl.sh
 └── README.md
 ```
 

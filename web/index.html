@@ -299,7 +299,7 @@ createApp({
   template:`
   <div class="layout">
     <div class="side">
-      <div class="side-brand"><span class="mark">Buddy 2 API</span><span class="ver">v1.2.0</span></div>
+      <div class="side-brand"><span class="mark">Buddy 2 API</span><span class="ver">v1.2.1</span></div>
       <div class="side-nav">
         <div class="nav-grp">
           <div class="nav-grp-label">概览</div>
@@ -561,6 +561,7 @@ createApp({
           <button class="btn s" @click="discover('')" :disabled="dl"><span v-html="I.refresh"></span>重新检测</button>
         </div>
       </div>
+      <div class="callout" v-if="disc?.runtime?.container && !disc.runtime.auth_mount_exists" style="margin-bottom:12px">当前运行在 Docker 容器内，容器不能直接扫描 Windows 的 C 盘。Windows Docker 推荐用 <span class="mono">.\start-docker-win.ps1</span> 启动，它会自动把默认登录目录只读挂载到 <span class="mono">/auth</span>。</div>
       <div v-if="dl" class="load" style="padding:18px"><div class="spin"></div></div>
       <template v-else>
         <div class="detect-grid">

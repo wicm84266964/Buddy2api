@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   buddy2api:
     build: .
@@ -9,12 +7,12 @@ services:
     volumes:
       # 持久化数据库
       - ./data:/app/data
-      # 挂载宿主机 auth 文件（Windows 路径按需修改）
-      # - /c/Users/<YOUR_NAME>/AppData/Local/CodeBuddyExtension/Data/Public/auth:/auth:ro
+      # Windows 推荐直接运行 .\start-docker-win.ps1 自动挂载登录目录
+      # WSL 推荐运行 ./start-docker-wsl.sh 自动挂载 /mnt/c 下的登录目录
     environment:
-      - CB_GATEWAY_ADMIN_TOKEN=change-this-token
+      - CB_GATEWAY_ADMIN_TOKEN=${CB_GATEWAY_ADMIN_TOKEN:-change-this-token}
       - CB_GATEWAY_DB_PATH=/app/data/buddy2api.db
-      # - CB_AUTH_DIR=/auth
+      - CB_AUTH_DIR=/auth
+      - CB_CONTAINER_AUTH_DIR=/auth
+      - CB_DOCKER=1
     restart: unless-stopped
-    # 如需使用宿主机 auth 文件，取消上面的 volumes 挂载注释
-    # 并取消上面的 CB_AUTH_DIR 注释

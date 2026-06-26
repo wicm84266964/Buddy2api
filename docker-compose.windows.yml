@@ -1,0 +1,8 @@
+services:
+  buddy2api:
+    volumes:
+      - ${CB_HOST_AUTH_DIR:?Set CB_HOST_AUTH_DIR to your Work Buddy auth directory}:/auth:ro
+    environment:
+      - CB_AUTH_DIR=/auth
+      - CB_CONTAINER_AUTH_DIR=/auth
+      - CB_DOCKER=1

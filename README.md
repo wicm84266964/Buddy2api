@@ -83,6 +83,35 @@ chmod +x start.sh
 
 ### Docker
 
+Windows Docker Desktop 推荐用脚本启动，它会自动找到当前 Windows 用户的 Work Buddy 登录目录，并只读挂载到容器内的 `/auth`：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-docker-win.ps1
+```
+
+如果你是在 WSL 里操作 Docker：
+
+```bash
+chmod +x start-docker-wsl.sh
+./start-docker-wsl.sh
+```
+
+这两个脚本默认寻找：
+
+```text
+C:\Users\<你的用户名>\AppData\Local\CodeBuddyExtension\Data\Public\auth
+```
+
+容器内会看到：
+
+```text
+/auth
+```
+
+所以 Web UI 的“重新检测 / 一键导入本机登录”可以直接发现账号，不需要手动粘贴 `.info`。
+
+如果只是启动服务，不自动挂载 Windows 登录目录，也可以用：
+
 ```bash
 docker-compose up -d
 ```
@@ -92,6 +121,8 @@ docker-compose up -d
 ```text
 http://127.0.0.1:8787
 ```
+
+注意：Docker 容器不能凭空扫描 Windows 的 C 盘，必须通过 volume 挂载。脚本做的就是自动找路径并挂载，挂载方式是只读的。
 
 ## 使用流程
 
@@ -201,6 +232,8 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `CB_GATEWAY_ADMIN_TOKEN` | 固定管理后台 Token |
 | `CB_GATEWAY_DB_PATH` | SQLite 数据库路径 |
 | `CB_AUTH_DIR` | 指定 Work Buddy / CodeBuddy auth 文件目录 |
+| `CB_HOST_AUTH_DIR` | Docker 启动脚本使用的宿主机 auth 目录 |
+| `CB_CONTAINER_AUTH_DIR` | Docker 容器内 auth 挂载目录，默认 `/auth` |
 
 ## 数据和安全
 
@@ -221,7 +254,9 @@ buddy2api/
 ├── web/index.html      # Vue 3 Web UI
 ├── Dockerfile
 ├── docker-compose.yml
+├── docker-compose.windows.yml
 ├── start.bat / start.sh
+├── start-docker-win.ps1 / start-docker-wsl.sh
 └── README.md
 ```
 

@@ -26,7 +26,7 @@ import database as db
 import auth_manager
 import proxy
 
-app = FastAPI(title="Buddy 2 API", version="1.2.0")
+app = FastAPI(title="Buddy 2 API", version="1.2.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -651,7 +651,7 @@ def main():
 
     accounts = db.list_accounts()
     sys.stderr.write(f"\n")
-    sys.stderr.write(f"  Buddy 2 API v1.2.0\n")
+    sys.stderr.write(f"  Buddy 2 API v1.2.1\n")
     sys.stderr.write(f"  ========================\n")
     sys.stderr.write(f"  监听: http://{args.host}:{args.port}\n")
     sys.stderr.write(f"  账号: {len(accounts)} 个 ({sum(1 for a in accounts if a['status']=='active')} active)\n")

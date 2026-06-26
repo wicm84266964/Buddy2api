@@ -49,6 +49,13 @@ def _expand_auth_path(path: Optional[str]) -> Optional[Path]:
     return Path(os.path.expandvars(value)).expanduser()
 
 
+def _running_in_container() -> bool:
+    value = os.environ.get("CB_DOCKER", "").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    return Path("/.dockerenv").exists()
+
+
 def _dedupe_paths(paths: list[Path]) -> list[Path]:
     result = []
     seen = set()
@@ -85,6 +92,8 @@ def candidate_auth_dirs(auth_dir: Optional[str] = None) -> list[Path]:
     home = Path.home()
     plat = sys.platform
     dirs = []
+    if _running_in_container():
+        dirs.append(Path(os.environ.get("CB_CONTAINER_AUTH_DIR", "/auth")))
     if plat == "darwin":
         dirs.append(home / "Library" / "Application Support" / "CodeBuddyExtension" / "Data" / "Public" / "auth")
     if plat == "win32":
@@ -172,6 +181,8 @@ def discover_auth_files(auth_dir: Optional[str] = None) -> dict:
     candidates = candidate_auth_dirs(auth_dir)
     existing_dirs = [d for d in candidates if d.is_dir()]
     visible_dirs = existing_dirs or candidates
+    in_container = _running_in_container()
+    auth_mount = Path(os.environ.get("CB_CONTAINER_AUTH_DIR", "/auth"))
 
     dirs = []
     for d in visible_dirs:
@@ -198,6 +209,11 @@ def discover_auth_files(auth_dir: Optional[str] = None) -> dict:
         "importable_count": sum(
             1 for f in files if f.get("valid") and not f.get("already_imported")
         ),
+        "runtime": {
+            "container": in_container,
+            "auth_mount": str(auth_mount),
+            "auth_mount_exists": auth_mount.is_dir() if in_container else False,
+        },
     }
 
 
