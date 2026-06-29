@@ -22,6 +22,23 @@ import auth_manager
 
 BACKEND = "https://copilot.tencent.com"
 
+# 腾讯内容审核拦截时返回的固定话术特征（HTTP 200 + 正文是这段话）
+_AUDIT_PHRASES = (
+    "系统检测到",
+    "敏感内容",
+    "无法响应您的请求",
+    "请检查后重新输入",
+    "内容违规",
+    "违规内容",
+    "不能提供相关",
+)
+
+
+def _looks_like_audit_block(text: str) -> bool:
+    if not text:
+        return False
+    return any(p in text for p in _AUDIT_PHRASES)
+
 PASSTHROUGH_BODY_KEYS = {
     "model", "messages", "tools", "tool_choice", "temperature",
     "max_tokens", "max_completion_tokens", "top_p", "stream",
@@ -265,6 +282,7 @@ async def _stream_upstream(
     usage: dict = {}
     buf = b""
     error_occurred = False
+    content_parts: list[str] = []  # 用于事后检测腾讯审核拦截话术
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=300, write=30, pool=10)) as c:
@@ -298,6 +316,9 @@ async def _stream_upstream(
                             for ch in obj.get("choices") or []:
                                 if ch.get("finish_reason"):
                                     finish_reason = ch["finish_reason"]
+                                delta = ch.get("delta") or {}
+                                if delta.get("content"):
+                                    content_parts.append(delta["content"])
                         yield chunk
     except httpx.HTTPError as e:
         error_occurred = True
@@ -307,13 +328,17 @@ async def _stream_upstream(
         return
 
     if not error_occurred:
+        full_text = "".join(content_parts)
+        audit_blocked = _looks_like_audit_block(full_text)
+        log_finish = "content_filter" if audit_blocked else (finish_reason or "stop")
+        log_err = ("[audit blocked] " + full_text[:300]) if audit_blocked else ""
         _log_request(
             api_key_info, account, model_name, True,
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0),
             usage.get("total_tokens", 0),
             usage.get("credit", 0),
-            finish_reason or "stop", 200, "", t0,
+            log_finish, 200, log_err, t0,
         )
 
 
