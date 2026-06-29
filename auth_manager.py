@@ -5,7 +5,7 @@ auth_manager.py — 多账号凭据管理
   - 从本机 auth 文件扫描导入账号
   - 手动添加账号（粘贴 auth JSON）
   - Token 自动刷新（提前 60s 判定过期）
-  - 账号轮换（最少使用优先，负载均衡）
+  - 账号粘性路由（优先级优先，同级尽量固定账号）
   - 凭据缓存与线程安全
 """
 
@@ -28,6 +28,8 @@ USER_AGENT = "codebuddy-gateway/1.0"
 
 _lock = threading.Lock()
 _token_locks: dict[int, threading.Lock] = {}
+_route_lock = threading.Lock()
+_sticky_account_id: Optional[int] = None
 
 
 def _get_token_lock(aid: int) -> threading.Lock:
@@ -802,23 +804,64 @@ def claim_daily_checkin(account: dict) -> dict:
 
 
 # ============================================================
-# 账号轮换（负载均衡）
+# 账号路由（同级粘性）
 # ============================================================
 
+def _route_int(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _route_priority(account: dict) -> int:
+    return _route_int(account.get("priority"), 0)
+
+
+def _route_weight(account: dict) -> int:
+    return max(1, _route_int(account.get("weight"), 1))
+
+
+def _route_sort_key(account: dict):
+    weight = _route_weight(account)
+    total_requests = _route_int(account.get("total_requests"), 0)
+    return (
+        -_route_priority(account),
+        -weight,
+        total_requests / weight,
+        total_requests,
+        _route_int(account.get("id"), 0),
+    )
+
+
+def _set_sticky_account(aid: int):
+    global _sticky_account_id
+    with _route_lock:
+        _sticky_account_id = aid
+
+
 def pick_account(exclude_ids: set[int] = None) -> Optional[dict]:
-    """选择一个可用账号。优先级越高越先用，同优先级按加权负载最低优先。"""
+    """选择一个可用账号。优先级越高越先用，同优先级尽量粘住当前账号。"""
+    global _sticky_account_id
     exclude_ids = exclude_ids or set()
     accounts = db.get_active_accounts()
     candidates = [a for a in accounts if a["id"] not in exclude_ids]
     if not candidates:
         return None
-    candidates.sort(key=lambda a: (
-        -int(a.get("priority") or 0),
-        (a.get("total_requests", 0) or 0) / max(1, int(a.get("weight") or 1)),
-        a.get("total_requests", 0) or 0,
-        a["id"],
-    ))
-    return candidates[0]
+
+    highest_priority = max(_route_priority(a) for a in candidates)
+    top_candidates = [a for a in candidates if _route_priority(a) == highest_priority]
+    with _route_lock:
+        if _sticky_account_id is not None:
+            sticky = next((a for a in top_candidates if a["id"] == _sticky_account_id), None)
+            if sticky:
+                return sticky
+
+        chosen = sorted(top_candidates, key=_route_sort_key)[0]
+        _sticky_account_id = chosen["id"]
+        return chosen
 
 
 def pick_account_with_fallback(exclude_ids: set[int] = None) -> Optional[dict]:
@@ -845,7 +888,10 @@ def pick_account_with_fallback(exclude_ids: set[int] = None) -> Optional[dict]:
         if a["id"] in (exclude_ids or set()):
             continue
         if refresh_token(a):
-            return db.get_account(a["id"])
+            fresh = db.get_account(a["id"])
+            if fresh:
+                _set_sticky_account(fresh["id"])
+            return fresh
     return None
 
 

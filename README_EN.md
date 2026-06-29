@@ -17,7 +17,7 @@ This project is mainly for personal use and testing. Do not deploy publicly, do 
 - **OpenAI Compatible** - `/v1/chat/completions` and `/v1/models`
 - **Streaming Output** - SSE streaming and non-streaming aggregated responses
 - **Auto Import Accounts** - Scans Work Buddy / CodeBuddy auth files on startup
-- **Multi-Account Routing** - Priority, weight, and weighted-load routing with automatic failover
+- **Multi-Account Routing** - Higher priority accounts are used first; accounts at the same priority stay sticky when possible, with automatic failover
 - **Account Diagnostics** - Enable/disable accounts, set weight/priority, refresh tokens, and run single-account tests
 - **Official Balance** - Accounts page can read official Work Buddy resource balance, credits expiring within 30 days, and package details
 - **Balance Snapshots** - Use a local current-balance snapshot as fallback when the official balance API is unavailable
