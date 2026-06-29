@@ -47,15 +47,40 @@ DEFAULT_MODELS = [
 # Built-in model aliases: alias_id -> backend_model_id
 # Extended by user-defined aliases from database settings "model_aliases".
 _BUILTIN_ALIASES = {
+    # GPT-5.x 系列 → 映射到后端可用模型
+    "gpt-5.5": "glm-5.2",
+    "gpt-5.5-mini": "glm-5.1",
+    "gpt-5.4": "glm-5.2",
+    "gpt-5.4-mini": "glm-5.1",
+    "gpt-5.4-codex": "glm-5.2",
+    "gpt-5.1": "glm-5.2",
+    "gpt-5.1-codex": "glm-5.2",
+    "gpt-5": "glm-5.2",
+    "gpt-5-mini": "glm-5.1",
+    # GPT-4.x 系列
     "gpt-4o": "glm-5.2",
     "gpt-4o-mini": "glm-5.1",
     "gpt-4-turbo": "glm-5.2",
     "gpt-4": "glm-5.2",
+    "gpt-4.1": "glm-5.2",
+    "gpt-4.1-mini": "glm-5.1",
     "gpt-3.5-turbo": "glm-5.1",
+    # o 系列推理模型
+    "o3": "deepseek-v4-pro",
+    "o3-mini": "deepseek-v4-flash",
+    "o4-mini": "deepseek-v4-pro",
+    "o1": "deepseek-v4-pro",
+    "o1-mini": "deepseek-v4-flash",
+    # Claude 系列
     "claude-3.5-sonnet": "deepseek-v4-pro",
     "claude-3-haiku": "deepseek-v4-flash",
+    "claude-sonnet-4": "deepseek-v4-pro",
+    "claude-opus-4": "deepseek-v4-pro",
+    # DeepSeek
     "deepseek-chat": "deepseek-v4-pro",
     "deepseek-coder": "deepseek-v4-pro",
+    "deepseek-r1": "deepseek-v4-pro",
+    # Moonshot
     "moonshot-v1-128k": "kimi-k2.7",
     "moonshot-v1-32k": "kimi-k2.6",
 }
