@@ -608,27 +608,80 @@ createApp({
   <div class="ov" v-if="sa" @click.self="sa=false"><div class="modal"><div class="modal-h"><h3>高级手动添加</h3><button class="x" @click="sa=false">&times;</button></div><div class="modal-b"><div class="field"><label>名称</label><input v-model="nm" placeholder="可选"/></div><div class="field"><label>Auth JSON</label><textarea v-model="ai" placeholder="粘贴 .info 文件内容"></textarea><div class="hint">只有自动检测失败时才需要手动粘贴完整 JSON。</div></div></div><div class="modal-f"><button class="btn" @click="sa=false" :disabled="adding">取消</button><button class="btn pri" @click="add" :disabled="adding">{{adding?'添加中':'添加'}}</button></div></div></div>
 </div>`
 }).component('keys',{props:['token','toast'],setup(p){
-  const l=ref([]),ld=ref(true),sa=ref(false),f=reactive({name:'',models:'',limit:null}),res=ref(''),saving=ref(false),copied=ref(false),busy=ref({});
+  const l=ref([]),ld=ref(true),sa=ref(false),f=reactive({name:'',models:'',limit:null,preset:'custom'}),res=ref(''),saving=ref(false),copied=ref(false),busy=ref({}),codexResult=ref(null),codexBusy=ref(false);
+  const clientTypes=[
+    {k:'custom',name:'自定义',icon:'⚙'},
+    {k:'codex',name:'Codex',icon:'◉'},
+    {k:'opencode',name:'OpenCode',icon:'⬡'},
+    {k:'openclaw',name:'OpenClaw',icon:'⬢'},
+    {k:'cherry',name:'Cherry Studio',icon:'◉'},
+    {k:'nextchat',name:'NextChat',icon:'◉'},
+  ];
+  const presets={
+    codex:{name:'Codex',autoName:'Codex',configTpl:(key)=>`# ~/.codex/config.toml\nmodel = "auto"\nmodel_provider = "buddy2api"\n\n[model_providers.buddy2api]\nname = "Buddy2api"\nbase_url = "http://127.0.0.1:8787/v1"\nwire_api = "responses"\nenv_key = "OPENAI_API_KEY"\napi_key = "${key}"\n\n# ~/.codex/auth.json\n{"OPENAI_API_KEY":"${key}"}`,note:'Codex 强制 wire_api="responses"，本网关已内置协议转换+内容清洗+模型别名。配置后需完全重启 Codex。',canAutoWrite:true},
+    opencode:{name:'OpenCode',autoName:'OpenCode',configTpl:(key)=>`# opencode.json\n{\n  "provider": {\n    "workbuddy": {\n      "name": "workbuddy",\n      "npm": "@ai-sdk/openai-compatible",\n      "options": {\n        "baseURL": "http://127.0.0.1:8787/v1",\n        "apiKey": "${key}"\n      },\n      "models": {\n        "auto": { "name": "Auto", "limit": { "context": 200000, "output": 32000 } }\n      }\n    }\n  }\n}`,note:'运行 opencode run -m workbuddy/auto "你好" 测试。',canAutoWrite:false},
+    openclaw:{name:'OpenClaw',autoName:'OpenClaw',configTpl:(key)=>`# 环境变量\nexport OPENAI_BASE_URL=http://127.0.0.1:8787/v1\nexport OPENAI_API_KEY=${key}\nexport OPENAI_MODEL=auto`,note:'OpenClaw 通过环境变量配置，写入 shell profile 后 source 即可。',canAutoWrite:false},
+    cherry:{name:'Cherry Studio',autoName:'Cherry Studio',configTpl:(key)=>`Base URL: http://127.0.0.1:8787/v1\nAPI Key: ${key}\nModel: auto\n供应商类型: OpenAI Compatible`,note:'Cherry Studio 设置 → 模型服务 → 添加自定义供应商。',canAutoWrite:false},
+    nextchat:{name:'NextChat',autoName:'NextChat',configTpl:(key)=>`接口地址: http://127.0.0.1:8787\nAPI Key: ${key}\n模型: auto`,note:'NextChat 自定义接口地址填到 /v1 上一级。',canAutoWrite:false},
+    custom:{name:'自定义',autoName:'',configTpl:(key)=>`Base URL: http://127.0.0.1:8787/v1\nAPI Key: ${key}\nModel: auto\nEndpoint: /v1/chat/completions`,note:'',canAutoWrite:false},
+  };
   function busyKey(id,k){return busy.value[id+'-'+k]}
   async function withBusy(k,id,fn){busy.value={...busy.value,[id+'-'+k]:true};try{return await fn()}finally{const o={...busy.value};delete o[id+'-'+k];busy.value=o}}
   async function load(){ld.value=true;try{l.value=await api.get('/admin/api-keys',p.token)}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
-  async function create(){if(saving.value)return;saving.value=true;try{const b={name:f.name};if(f.models)b.allowed_models=f.models.split(',').map(s=>s.trim()).filter(Boolean);if(f.limit)b.daily_limit=parseInt(f.limit);const r=await api.post('/admin/api-keys',b,p.token);res.value=r.key;p.toast('创建成功');await load()}catch(e){p.toast(apiErr(e,'创建失败'),'err')}saving.value=false}
+  async function create(){if(saving.value)return;saving.value=true;try{const b={name:f.name||presets[f.preset].autoName||'Key',client_type:f.preset};if(f.models)b.allowed_models=f.models.split(',').map(s=>s.trim()).filter(Boolean);if(f.limit)b.daily_limit=parseInt(f.limit);const r=await api.post('/admin/api-keys',b,p.token);res.value=r.key;p.toast('创建成功');await load()}catch(e){p.toast(apiErr(e,'创建失败'),'err')}saving.value=false}
   async function toggle(k){await withBusy('toggle',k.id,async()=>{try{await api.put('/admin/api-keys/'+k.id,{status:k.status==='active'?'inactive':'active'},p.token);p.toast(k.status==='active'?'已禁用':'已启用');await load()}catch(e){p.toast(apiErr(e,'操作失败'),'err')}})}
   async function del(k){if(!confirm('删除 API Key '+(k.name||k.key_prefix||k.id)+' ?'))return;await withBusy('del',k.id,async()=>{try{await api.del('/admin/api-keys/'+k.id,p.token);p.toast('已删除');await load()}catch(e){p.toast(apiErr(e,'删除失败'),'err')}})}
-  function cp(v){navigator.clipboard.writeText(v);copied.value=true;p.toast('已复制','info')}
+  function cp(v){navigator.clipboard.writeText(v);copied.value=true;p.toast('已复制','info');setTimeout(()=>copied.value=false,1500)}
   function tok(v){v=Number(v||0);if(v>=1e9)return (v/1e9).toFixed(v>=1e10?1:2).replace(/\.?0+$/,'')+'B';if(v>=1e6)return (v/1e6).toFixed(v>=1e7?1:2).replace(/\.?0+$/,'')+'M';return v.toLocaleString()}
-  function close(){sa.value=false;res.value='';f.name='';f.models='';f.limit=null}
-  onMounted(load);return{l,ld,sa,f,res,saving,copied,busyKey,load,create,toggle,del,cp,tok,close,I}
+  function close(){sa.value=false;res.value='';f.name='';f.models='';f.limit=null;f.preset='custom';codexResult.value=null}
+  async function codexAutoWrite(){
+    if(codexBusy.value||!res.value)return;codexBusy.value=true;codexResult.value=null;
+    try{const r=await api.post('/admin/codex/setup',{api_key:res.value},p.token);codexResult.value=r;if(r.status==='ok')p.toast('Codex 配置已写入','ok');else p.toast('写入失败','err')}catch(e){p.toast(apiErr(e,'写入失败'),'err');codexResult.value={status:'error',message:String(e)}}
+    codexBusy.value=false;
+  }
+  onMounted(load);return{l,ld,sa,f,res,saving,copied,busyKey,clientTypes,presets,load,create,toggle,del,cp,tok,close,I,codexResult,codexBusy,codexAutoWrite}
 },template:`
 <div>
   <div class="phead"><h1>API Keys</h1><p>客户端访问密钥</p></div>
   <div class="tbar"><button class="btn s pri" @click="sa=true"><span v-html="I.plus"></span>创建</button><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button><div class="spacer"></div><span class="tag" v-if="l.length">{{l.length}}个</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
-  <div class="card" v-else-if="l.length"><table><thead><tr><th>名称</th><th>Key</th><th>状态</th><th>模型</th><th>今日/日限额</th><th>请求</th><th>Token</th><th></th></tr></thead><tbody>
-    <tr v-for="k in l" :key="k.id"><td style="font-weight:600">{{k.name||'-'}}</td><td class="mono">{{k.key_prefix||'-'}}</td><td><span class="badge" :class="k.status">{{k.status}}</span></td><td>{{k.allowed_models?k.allowed_models.join(', '):'全部'}}</td><td>{{k.today_requests||0}} / {{k.daily_limit||'不限'}}</td><td>{{k.total_requests}}</td><td>{{tok(k.total_tokens)}}</td><td><button class="btn s" @click="toggle(k)" :disabled="busyKey(k.id,'toggle')" style="margin-right:4px">{{busyKey(k.id,'toggle')?'处理中':(k.status==='active'?'禁用':'启用')}}</button><button class="btn s danger" @click="del(k)" :disabled="busyKey(k.id,'del')">{{busyKey(k.id,'del')?'删除中':'删除'}}</button></td></tr>
+  <div class="card" v-else-if="l.length"><table><thead><tr><th>名称</th><th>类型</th><th>Key</th><th>状态</th><th>模型</th><th>今日/限额</th><th>请求</th><th>Token</th><th></th></tr></thead><tbody>
+    <tr v-for="k in l" :key="k.id"><td style="font-weight:600">{{k.name||'-'}}</td><td><span class="tag" :style="{background:k.client_type==='codex'?'var(--blue-bg)':'#f5f5f5',color:k.client_type==='codex'?'var(--blue)':'var(--fg3)'}">{{k.client_type||'custom'}}</span></td><td class="mono">{{k.key_prefix||'-'}}</td><td><span class="badge" :class="k.status">{{k.status}}</span></td><td>{{k.allowed_models?k.allowed_models.join(', '):'全部'}}</td><td>{{k.today_requests||0}} / {{k.daily_limit||'不限'}}</td><td>{{k.total_requests}}</td><td>{{tok(k.total_tokens)}}</td><td><button class="btn s" @click="toggle(k)" :disabled="busyKey(k.id,'toggle')" style="margin-right:4px">{{busyKey(k.id,'toggle')?'...':(k.status==='active'?'禁用':'启用')}}</button><button class="btn s danger" @click="del(k)" :disabled="busyKey(k.id,'del')">{{busyKey(k.id,'del')?'...':'删除'}}</button></td></tr>
   </tbody></table></div>
   <div class="card card-p empty" v-else><div class="em">🔑</div><p>暂无 Key</p></div>
-  <div class="ov" v-if="sa" @click.self="close"><div class="modal"><div class="modal-h"><h3>创建 Key</h3><button class="x" @click="close">&times;</button></div><div class="modal-b"><template v-if="res"><div class="field"><label>新 Key</label><div class="keybox">{{res}}</div><button class="btn s pri" style="margin-top:8px" @click="cp(res)">{{copied?'已复制':'复制'}}</button><div class="hint">只显示这一次，关闭后无法再次查看完整 Key。</div></div></template><template v-else><div class="field"><label>名称</label><input v-model="f.name" placeholder="OpenClaw"/></div><div class="field"><label>允许模型</label><input v-model="f.models" placeholder="auto,glm-5.2（留空=全部）"/></div><div class="field"><label>每日请求限额</label><input v-model="f.limit" type="number" placeholder="不限"/></div></template></div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res" :disabled="saving">{{saving?'创建中':'创建'}}</button></div></div></div>
+  <div class="ov" v-if="sa" @click.self="close"><div class="modal" style="max-width:560px"><div class="modal-h"><h3>创建 Key</h3><button class="x" @click="close">&times;</button></div><div class="modal-b">
+    <template v-if="res">
+      <div class="field"><label>新 Key（只显示一次）</label><div class="keybox">{{res}}</div><button class="btn s pri" style="margin-top:8px" @click="cp(res)">{{copied?'已复制':'复制 Key'}}</button></div>
+      <div v-if="f.preset!=='custom'" style="margin-top:16px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">{{presets[f.preset].name}} 接入配置</div>
+        <div v-if="f.preset==='codex'" class="callout" style="margin-bottom:10px;font-size:12px;background:var(--green-bg);border-color:#c3e6cc;color:#006633">
+          <strong>已为该 Key 自动启用 Codex 专用处理</strong> — 内容清洗（sandbox/filesystem/execute 等敏感词替换）、模型别名映射（gpt-5.5→glm-5.2 等）、工具过滤、Responses API 协议转换均自动生效，无需额外配置。
+        </div>
+        <div v-if="presets[f.preset].note" class="callout" style="margin-bottom:10px;font-size:12px">{{presets[f.preset].note}}</div>
+        <div class="codeblk" style="font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-all">{{presets[f.preset].configTpl(res)}}</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn s" @click="cp(presets[f.preset].configTpl(res))">复制配置</button>
+          <button v-if="presets[f.preset].canAutoWrite" class="btn s pri" @click="codexAutoWrite" :disabled="codexBusy">{{codexBusy?'写入中...':'一键写入 Codex 配置文件'}}</button>
+        </div>
+        <div v-if="codexResult" style="margin-top:10px;padding:10px;border-radius:var(--r);border:1px solid var(--border);font-size:12px" :style="{color:codexResult.status==='ok'?'var(--green)':'var(--red)'}">
+          <strong>{{codexResult.status==='ok'?'写入成功':'写入失败'}}</strong>
+          <div v-if="codexResult.status==='ok'" style="color:var(--fg2);margin-top:4px">已写入 config.toml + auth.json，请重启 Codex。</div>
+          <div v-else style="margin-top:4px">{{codexResult.message}}</div>
+        </div>
+      </div>
+    </template>
+    <template v-else>
+      <div class="field"><label>客户端类型</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button v-for="t in clientTypes" :key="t.k" :class="['btn','s',{on:f.preset===t.k}]" @click="f.preset=t.k" style="border:1px solid var(--border);border-radius:var(--r);padding:6px 12px;font-size:12px;cursor:pointer" :style="{background:f.preset===t.k?'var(--blue-bg)':'var(--bg)',color:f.preset===t.k?'var(--blue)':'var(--fg)',borderColor:f.preset===t.k?'var(--blue-border)':'var(--border)',fontWeight:f.preset===t.k?'600':'400'}">{{t.icon}} {{t.name}}</button>
+        </div>
+        <div class="hint" style="margin-top:4px">选择目标客户端，创建后自动展示对应配置。选"自定义"仅创建 Key。</div>
+      </div>
+      <div class="field"><label>名称</label><input v-model="f.name" :placeholder="presets[f.preset].autoName||'自定义名称'"/></div>
+      <div class="field"><label>允许模型</label><input v-model="f.models" placeholder="auto,glm-5.2（留空=全部）"/></div>
+      <div class="field"><label>每日请求限额</label><input v-model="f.limit" type="number" placeholder="不限"/></div>
+    </template>
+  </div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res" :disabled="saving">{{saving?'创建中':'创建'}}</button></div></div></div>
 </div>`
 }).component('mdls',{props:['token','toast'],setup(p){
   const m=ref([]),al=ref({}),ld=ref(true);
@@ -718,8 +771,10 @@ createApp({
 </div>`
 }).component('stgs',{props:['token','toast'],setup(p){
   const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,base_url:'http://127.0.0.1:8787/v1',admin_auth:'本机 Cookie 自动验证',data_file:'codebuddy_gateway.db'};
-  const s=ref({...defaults}),stats=ref(null),ld=ref(true),saving=ref(false),copied=ref(''),setupTab=ref('opencode');
+  const s=ref({...defaults}),stats=ref(null),ld=ref(true),saving=ref(false),copied=ref(''),setupTab=ref('codex');
+  const keysList=ref([]),codexKeyInput=ref(''),codexStatus=ref(null),codexBusy=ref(false),codexResult=ref(null);
   const presets={
+    codex:{name:'Codex (OpenAI)',base:'http://127.0.0.1:8787/v1',model:'auto',note:'Codex 强制使用 Responses API (wire_api="responses")。本网关已内置协议转换层，自动将 /v1/responses 映射到后端 Chat Completions。模型别名、内容清洗均自动启用。'},
     opencode:{name:'OpenCode / OpenClaw',base:'http://127.0.0.1:8787/v1',model:'auto',note:'运行在宿主机上的客户端直接使用 127.0.0.1。'},
     sub2api:{name:'sub2api Docker',base:'http://host.docker.internal:8787/v1',model:'auto',note:'sub2api 在 Docker 容器内访问宿主机时使用 host.docker.internal，不要填 localhost。'},
     cherry:{name:'Cherry Studio',base:'http://127.0.0.1:8787/v1',model:'auto',note:'供应商类型选择 OpenAI Compatible，Key 使用 API Keys 页面创建的 sk-cb。'},
@@ -727,15 +782,37 @@ createApp({
     generic:{name:'通用 OpenAI Compatible',base:'http://127.0.0.1:8787/v1',model:'auto',note:'仅支持 /v1/chat/completions 和 /v1/models；不要把 /v1/responses 拼到 Base URL 后面。'},
     curl:{name:'curl',base:'http://127.0.0.1:8787/v1',model:'auto',note:'用于快速验证服务、Key 和模型映射是否正常。'},
   };
-  async function load(){ld.value=true;try{const cfg=await api.get('/admin/settings',p.token);s.value={...defaults,...cfg};stats.value=await api.get('/admin/stats',p.token)}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
+  async function load(){ld.value=true;try{const cfg=await api.get('/admin/settings',p.token);s.value={...defaults,...cfg};stats.value=await api.get('/admin/stats',p.token);keysList.value=await api.get('/admin/api-keys',p.token);if(keysList.value.length&&!codexKey.value)codexKey.value=keysList.value[0].name||'';try{codexStatus.value=await api.get('/admin/codex/status',p.token)}catch(e){}}catch(e){p.toast(apiErr(e,'加载失败'),'err')}ld.value=false}
   async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',{backend_url:s.value.backend_url,default_domain:s.value.default_domain,timeout:Number(s.value.timeout)||300},p.token);p.toast('已保存')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
   function resetDefaults(){s.value={...s.value,backend_url:defaults.backend_url,default_domain:defaults.default_domain,timeout:defaults.timeout};p.toast('已恢复默认','info')}
+  async function codexSetup(){
+    if(codexBusy.value)return;
+    if(!codexKeyInput.value||!codexKeyInput.value.startsWith('sk-cb-')){p.toast('请输入有效的 sk-cb- 开头的 API Key','err');return}
+    codexBusy.value=true;codexResult.value=null;
+    try{
+      const res=await api.post('/admin/codex/setup',{api_key:codexKeyInput.value.trim()},p.token);
+      codexResult.value=res;
+      if(res.status==='ok'){p.toast('Codex 配置已写入','ok');try{codexStatus.value=await api.get('/admin/codex/status',p.token)}catch(e){}}
+      else{p.toast('配置失败','err')}
+    }catch(e){p.toast(apiErr(e,'配置失败'),'err');codexResult.value={status:'error',message:String(e)}}
+    codexBusy.value=false;
+  }
   function copy(v,name){navigator.clipboard.writeText(v);copied.value=name;p.toast('已复制','info');setTimeout(()=>copied.value='',1200)}
   function n(v){return Number(v||0).toLocaleString()}
-  const currentPreset=computed(()=>presets[setupTab.value]||presets.opencode)
-  function envBlock(){const x=currentPreset.value;return `OPENAI_BASE_URL=${x.base}\nOPENAI_API_KEY=YOUR_SK_CB_KEY\nOPENAI_MODEL=${x.model}`}
-  function curlBlock(){const x=currentPreset.value;return `curl ${x.base}/chat/completions \\\n  -H "Authorization: Bearer YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${x.model}","messages":[{"role":"user","content":"hi"}]}'`}
-  onMounted(load);return{s,stats,ld,saving,copied,setupTab,presets,currentPreset,envBlock,curlBlock,load,save,resetDefaults,copy,n,I}
+  const currentPreset=computed(()=>presets[setupTab.value]||presets.codex)
+  function envBlock(){
+    if(setupTab.value==='codex'){
+      return `# ~/.codex/config.toml\nmodel = "auto"\nmodel_provider = "buddy2api"\n\n[model_providers.buddy2api]\nname = "Buddy2api"\nbase_url = "http://127.0.0.1:8787/v1"\nwire_api = "responses"\nenv_key = "OPENAI_API_KEY"\napi_key = "YOUR_SK_CB_KEY"\n\n# ~/.codex/auth.json\n{"OPENAI_API_KEY":"YOUR_SK_CB_KEY"}`
+    }
+    const x=currentPreset.value;return `OPENAI_BASE_URL=${x.base}\nOPENAI_API_KEY=YOUR_SK_CB_KEY\nOPENAI_MODEL=${x.model}`
+  }
+  function curlBlock(){
+    if(setupTab.value==='codex'){
+      return `# 测试 Responses API（Codex 使用的端点）\ncurl http://127.0.0.1:8787/v1/responses \\\n  -H "Authorization: Bearer YOUR_SK_CB_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"auto","input":"hi","stream":false}'`
+    }
+    const x=currentPreset.value;return `curl ${x.base}/chat/completions \\\n  -H "Authorization: Bearer YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${x.model}","messages":[{"role":"user","content":"hi"}]}'`
+  }
+  onMounted(load);return{s,stats,ld,saving,copied,setupTab,presets,currentPreset,envBlock,curlBlock,load,save,resetDefaults,copy,n,I,keysList,codexKeyInput,codexStatus,codexBusy,codexResult,codexSetup}
 },template:`
 <div>
   <div class="phead"><h1>设置</h1><p>运行配置、接入信息和本机维护</p></div>
@@ -778,7 +855,7 @@ createApp({
     <div class="card">
       <div class="card-h">客户端接入向导<span class="sub">按运行位置选择地址</span></div>
       <div class="card-p">
-        <div class="callout" style="margin-bottom:12px">宿主机客户端用 <span class="mono">http://127.0.0.1:8787/v1</span>；Docker 容器里的 sub2api 用 <span class="mono">http://host.docker.internal:8787/v1</span>。当前只提供 <span class="mono">/v1/chat/completions</span> 和 <span class="mono">/v1/models</span>，不要把 <span class="mono">/v1/responses</span> 拼进 Base URL。</div>
+        <div class="callout" style="margin-bottom:12px">宿主机客户端用 <span class="mono">http://127.0.0.1:8787/v1</span>；Docker 容器里的 sub2api 用 <span class="mono">http://host.docker.internal:8787/v1</span>。Codex 选择 "Codex (OpenAI)" 标签查看专用配置（wire_api、内容清洗等自动处理）。</div>
         <div class="setup-tabs"><button v-for="(x,k) in presets" :key="k" :class="{on:setupTab===k}" @click="setupTab=k">{{x.name}}</button></div>
         <div class="setup-panel">
           <div class="info-list">
@@ -789,9 +866,54 @@ createApp({
           </div>
           <div>
             <div class="codeblk" style="margin-bottom:10px">{{envBlock()}}</div>
-            <button class="btn s" @click="copy(envBlock(),'preset-env')" style="margin-bottom:10px">{{copied==='preset-env'?'已复制':'复制环境变量'}}</button>
+            <button class="btn s" @click="copy(envBlock(),'preset-env')" style="margin-bottom:10px">{{copied==='preset-env'?'已复制':'复制配置'}}</button>
             <div class="codeblk">{{curlBlock()}}</div>
             <button class="btn s" @click="copy(curlBlock(),'preset-curl')" style="margin-top:10px">{{copied==='preset-curl'?'已复制':'复制 curl'}}</button>
+          </div>
+        </div>
+        <div v-if="setupTab==='codex'" class="callout" style="margin-top:16px;background:var(--blue-soft);border-color:var(--blue-border)">
+          <div style="font-weight:600;margin-bottom:8px">Codex 专用处理（自动启用，无需手动配置）</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px">
+            <div><strong>Responses API 转换</strong><br/><span style="color:var(--fg2)">/v1/responses 请求自动转换为 Chat Completions 转发后端，响应再映射回 Responses SSE 事件格式</span></div>
+            <div><strong>模型别名映射</strong><br/><span style="color:var(--fg2)">gpt-5.5 / gpt-5.4 / o3 / o4-mini 等自动映射到 glm-5.2 / deepseek-v4-pro 等后端模型</span></div>
+            <div><strong>内容清洗</strong><br/><span style="color:var(--fg2)">Codex system prompt 中的 sandbox / filesystem / execute / elevated 等敏感词自动替换，避免触发腾讯内容审核</span></div>
+            <div><strong>工具过滤</strong><br/><span style="color:var(--fg2)">非 function 类型工具（web_search / file_search 等）自动过滤，developer 角色映射为 system</span></div>
+          </div>
+        </div>
+        <div v-if="setupTab==='codex'" style="margin-top:16px;border:1px solid var(--blue-border);border-radius:var(--r);padding:16px;background:var(--blue-soft)">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">一键配置 Codex</div>
+          <div style="font-size:12px;color:var(--fg2);margin-bottom:16px">选择一个 API Key，自动写入 <span class="mono">~/.codex/config.toml</span> 和 <span class="mono">~/.codex/auth.json</span>（原文件备份为 .bak），并设置 <span class="mono">OPENAI_API_KEY</span> 环境变量。配置后需完全关闭 Codex 重新打开。</div>
+          
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+            <div class="field" style="flex:1;min-width:280px;margin:0">
+              <label>API Key（sk-cb- 开头）</label>
+              <input v-model="codexKeyInput" placeholder="sk-cb-xxxxxxxxxxxxxxxx" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);font-size:13px;font-family:var(--mono);background:var(--bg)"/>
+              <div class="hint" style="margin-top:4px">在 API Keys 页面创建后复制，粘贴到此处。Key 只在创建时显示一次。</div>
+            </div>
+            <button class="btn pri" @click="codexSetup" :disabled="codexBusy||!codexKeyInput" style="white-space:nowrap">{{codexBusy?'写入中...':'一键写入配置'}}</button>
+          </div>
+
+          <div v-if="codexStatus" style="margin-top:12px">
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px">当前 Codex 配置状态</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <span class="badge" :class="codexStatus.config_has_buddy2api?'ok':'inactive'">Provider: {{codexStatus.config_has_buddy2api?'buddy2api':'未配置'}}</span>
+              <span class="badge" :class="codexStatus.config_wire_api==='responses'?'ok':'warn'">wire_api: {{codexStatus.config_wire_api||'未设置'}}</span>
+              <span class="badge" :class="codexStatus.auth_has_key?'ok':'inactive'">auth.json: {{codexStatus.auth_has_key?'已配置':'未配置'}}</span>
+              <span class="badge" :class="codexStatus.config_model?'ok':'inactive'">model: {{codexStatus.config_model||'未设置'}}</span>
+            </div>
+          </div>
+
+          <div v-if="codexResult" style="margin-top:12px;padding:12px;border-radius:var(--r);background:var(--bg);border:1px solid var(--border)">
+            <div v-if="codexResult.status==='ok'" style="color:var(--green)">
+              <strong>配置成功</strong>
+              <div style="margin-top:6px;font-size:12px;color:var(--fg2)">已写入文件：<span class="mono" v-for="f in codexResult.written" :key="f">{{f}} </span></div>
+              <div v-if="codexResult.backed_up && codexResult.backed_up.length" style="margin-top:4px;font-size:12px;color:var(--fg3)">已备份：<span class="mono" v-for="f in codexResult.backed_up" :key="f">{{f}} </span></div>
+              <div style="margin-top:8px;font-size:12px;color:var(--blue)">请完全关闭 Codex 后重新打开。</div>
+            </div>
+            <div v-else style="color:var(--red)">
+              <strong>配置失败</strong>
+              <div style="margin-top:4px;font-size:12px">{{codexResult.message||'未知错误'}}</div>
+            </div>
           </div>
         </div>
       </div>

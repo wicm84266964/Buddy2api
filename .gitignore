@@ -78,3 +78,7 @@ _mimo-backup-*/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 本地运行时记忆/产物
+.workbuddy/
+.debug/

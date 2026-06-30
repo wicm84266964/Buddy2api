@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 import database as db
 import auth_manager
 import proxy
+import responses
 
 app = FastAPI(title="Buddy 2 API", version="1.2.1")
 
@@ -150,6 +151,10 @@ async def chat_completions(
     if not messages:
         raise HTTPException(status_code=400, detail={"error": {"message": "messages is required", "type": "invalid_request_error"}})
 
+    # Codex 类型 Key：自动应用内容清洗 + 工具过滤
+    if api_key_info and api_key_info.get("client_type") == "codex":
+        payload = responses.apply_codex_sanitize(payload)
+
     # 检查 API Key 模型权限（同时匹配别名和真实模型 ID）
     if api_key_info and api_key_info.get("allowed_models"):
         raw_model = payload.get("model", "auto")
@@ -158,6 +163,41 @@ async def chat_completions(
             raise HTTPException(status_code=403, detail={"error": {"message": f"Model '{raw_model}' not allowed for this API key", "type": "invalid_request_error"}})
 
     result = await proxy.proxy_chat_completions(payload, api_key_info)
+
+    if result[0] == "error":
+        status, detail = result[1]
+        return JSONResponse(status_code=status, content=detail)
+    elif result[0] == "json":
+        return JSONResponse(content=result[1])
+    elif result[0] == "stream":
+        return StreamingResponse(
+            result[1],
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+
+@app.post("/v1/responses")
+async def resp_responses(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+):
+    """OpenAI Responses API 兼容端点（Codex wire_api="responses" 支持）。"""
+    api_key_info = _check_client_auth(authorization, x_api_key)
+
+    try:
+        payload = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail={"error": {"message": f"bad json: {e}", "type": "invalid_request_error"}})
+
+    try:
+        result = await responses.proxy_responses(payload, api_key_info)
+    except Exception as e:
+        import traceback
+        sys.stderr.write(f"[responses] ERROR: {e}\n{traceback.format_exc()}\n")
+        sys.stderr.flush()
+        return JSONResponse(status_code=502, content={"error": {"message": f"internal bridge error: {e}", "type": "server_error"}})
 
     if result[0] == "error":
         status, detail = result[1]
@@ -480,9 +520,10 @@ async def admin_create_key(
     name = data.get("name", "")
     allowed = data.get("allowed_models")
     daily_limit = data.get("daily_limit")
+    client_type = data.get("client_type", "custom")
     # 生成 sk- 前缀的 key
     key = f"sk-cb-{secrets.token_urlsafe(32)}"
-    kid = db.add_api_key(key, name, allowed, daily_limit)
+    kid = db.add_api_key(key, name, allowed, daily_limit, client_type)
     return {"id": kid, "key": key, "status": "ok"}
 
 
@@ -580,6 +621,142 @@ async def admin_update_models(
     data = await request.json()
     db.set_setting("models", data)
     return {"status": "ok"}
+
+
+# --- Codex 一键配置 ---
+
+@app.post("/admin/codex/setup")
+async def admin_codex_setup(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    """一键配置 Codex：写入 config.toml 和 auth.json。"""
+    _check_admin(authorization)
+    data = await request.json()
+    api_key = data.get("api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+
+    codex_dir = Path.home() / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = codex_dir / "config.toml"
+    auth_path = codex_dir / "auth.json"
+
+    # 备份现有文件
+    results = {"backed_up": [], "written": [], "config_path": str(config_path), "auth_path": str(auth_path)}
+    for p in [config_path, auth_path]:
+        if p.exists():
+            bak = p.with_suffix(p.suffix + ".bak")
+            bak.write_bytes(p.read_bytes())
+            results["backed_up"].append(str(bak))
+
+    # 读取现有 config.toml，保留 marketplaces 等非冲突段
+    existing_config = ""
+    if config_path.exists():
+        existing_config = config_path.read_text(encoding="utf-8")
+
+    # 构建新的 config.toml
+    # 保留 [marketplaces.*] 和 [projects.*] 和 [desktop] 段，替换/插入顶层和 provider
+    new_lines = []
+    in_skip_section = False
+    skip_section_prefixes = ["[model_providers", "model ", "model=", "model_provider"]
+
+    for line in existing_config.splitlines():
+        stripped = line.strip()
+        # 跳过旧的 model / model_provider / [model_providers.*] 行
+        if any(stripped.startswith(prefix) for prefix in ["model =", "model=", "model_provider"]):
+            continue
+        if stripped.startswith("[model_providers"):
+            in_skip_section = True
+            continue
+        if in_skip_section:
+            if stripped.startswith("[") and not stripped.startswith("[model_providers"):
+                in_skip_section = False
+                new_lines.append(line)
+            else:
+                continue
+        else:
+            new_lines.append(line)
+
+    # 在文件开头插入 model 和 provider 配置
+    codex_config = f'''model = "auto"
+model_provider = "buddy2api"
+
+[model_providers.buddy2api]
+name = "Buddy2api"
+base_url = "http://127.0.0.1:8787/v1"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"
+api_key = "{api_key}"
+
+'''
+    # 保留原有内容（去掉了旧 model 配置）
+    preserved = "\n".join(new_lines).strip()
+    final_config = codex_config + ("\n" + preserved if preserved else "")
+    config_path.write_text(final_config, encoding="utf-8")
+    results["written"].append(str(config_path))
+
+    # 写 auth.json
+    import json as _json
+    auth_content = _json.dumps({"OPENAI_API_KEY": api_key}, indent=2)
+    auth_path.write_text(auth_content, encoding="utf-8")
+    results["written"].append(str(auth_path))
+
+    # 同时设置环境变量（当前进程 + 用户级）
+    os.environ["OPENAI_API_KEY"] = api_key
+    try:
+        if sys.platform == "win32":
+            import subprocess
+            subprocess.run(
+                ["setx", "OPENAI_API_KEY", api_key],
+                capture_output=True, timeout=5
+            )
+    except Exception:
+        pass
+
+    results["status"] = "ok"
+    results["message"] = "Codex 配置已写入。请完全关闭 Codex 后重新打开。"
+    return results
+
+
+@app.get("/admin/codex/status")
+async def admin_codex_status(authorization: str | None = Header(default=None)):
+    """检查 Codex 配置状态。"""
+    _check_admin(authorization)
+    codex_dir = Path.home() / ".codex"
+    config_path = codex_dir / "config.toml"
+    auth_path = codex_dir / "auth.json"
+
+    result = {
+        "codex_dir_exists": codex_dir.exists(),
+        "config_exists": config_path.exists(),
+        "auth_exists": auth_path.exists(),
+        "config_has_buddy2api": False,
+        "config_wire_api": None,
+        "config_model": None,
+        "auth_has_key": False,
+    }
+
+    if config_path.exists():
+        content = config_path.read_text(encoding="utf-8")
+        result["config_has_buddy2api"] = "buddy2api" in content
+        for line in content.splitlines():
+            s = line.strip()
+            if s.startswith("wire_api"):
+                result["config_wire_api"] = s.split("=", 1)[1].strip().strip('"')
+            elif s.startswith("model ") or s.startswith("model="):
+                result["config_model"] = s.split("=", 1)[1].strip().strip('"')
+
+    if auth_path.exists():
+        try:
+            import json as _json
+            auth = _json.loads(auth_path.read_text(encoding="utf-8"))
+            result["auth_has_key"] = bool(auth.get("OPENAI_API_KEY"))
+        except Exception:
+            pass
+
+    return result
 
 
 # --- Model Aliases ---

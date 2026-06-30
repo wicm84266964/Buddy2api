@@ -97,6 +97,7 @@ def init_db():
             status          TEXT DEFAULT 'active',
             allowed_models  TEXT,
             daily_limit     INTEGER DEFAULT 0,
+            client_type     TEXT DEFAULT 'custom',
             total_requests  INTEGER DEFAULT 0,
             total_tokens    INTEGER DEFAULT 0,
             created_at      INTEGER,
@@ -227,6 +228,9 @@ def _migrate_api_keys(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE api_keys ADD COLUMN key_hash TEXT")
     if "daily_limit" not in cols:
         conn.execute("ALTER TABLE api_keys ADD COLUMN daily_limit INTEGER DEFAULT 0")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(api_keys)").fetchall()}
+    if "client_type" not in cols:
+        conn.execute("ALTER TABLE api_keys ADD COLUMN client_type TEXT DEFAULT 'custom'")
 
 
 # ============================================================
@@ -455,16 +459,16 @@ def get_account_checkin_cache(account_id: int, today_only: bool = True) -> Optio
 # ============================================================
 
 def add_api_key(key: str, name: str, allowed_models: Optional[list] = None,
-                daily_limit: Optional[int] = None) -> int:
+                daily_limit: Optional[int] = None, client_type: str = "custom") -> int:
     now = int(time.time())
     models_json = json.dumps(allowed_models) if allowed_models else None
     limit = int(daily_limit or 0)
     with _lock:
         conn = get_conn()
         cur = conn.execute("""
-            INSERT INTO api_keys (key_prefix, key_hash, name, status, allowed_models, daily_limit, created_at)
-            VALUES (?,?,?,?,?,?,?)
-        """, (_key_prefix(key), _hash_api_key(key), name, "active", models_json, limit, now))
+            INSERT INTO api_keys (key_prefix, key_hash, name, status, allowed_models, daily_limit, client_type, created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (_key_prefix(key), _hash_api_key(key), name, "active", models_json, limit, client_type, now))
         kid = cur.lastrowid
         conn.commit()
         conn.close()
@@ -474,7 +478,7 @@ def add_api_key(key: str, name: str, allowed_models: Optional[list] = None,
 def update_api_key(kid: int, data: dict):
     fields = []
     values = []
-    for k in ["name", "status", "allowed_models", "daily_limit"]:
+    for k in ["name", "status", "allowed_models", "daily_limit", "client_type"]:
         if k in data:
             val = data[k]
             if k == "allowed_models" and isinstance(val, list):
