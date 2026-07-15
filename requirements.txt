@@ -1,4 +1,4 @@
-cryptography==43.0.0
+cryptography==49.0.0
 fastapi==0.128.0
 httpx==0.27.0
 uvicorn[standard]==0.40.0
