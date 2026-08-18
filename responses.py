@@ -70,7 +70,20 @@ def apply_codex_sanitize(chat_payload: dict) -> dict:
     """
     对 Chat Completions 请求应用 Codex 专用清洗。
     用于 client_type='codex' 的 API Key，即使请求直接打到 /v1/chat/completions 也做清洗。
+
+    仅当请求携带 Codex 特征 prompt 时才改写；DSH/OpenClaw 等其它客户端
+    借用 codex key 时原样透传，避免清洗破坏其 agent 指令与工具定义。
     """
+    # 无 Codex 特征：不改写
+    if not any(
+        isinstance(msg, dict) and _looks_like_codex_prompt(
+            msg.get("content") if isinstance(msg.get("content"), str) else _flatten_content(msg.get("content") or "")
+        )
+        for msg in chat_payload.get("messages") or []
+        if isinstance(msg, dict) and msg.get("role") in ("system", "developer")
+    ):
+        return chat_payload
+
     # 清洗 system messages
     for msg in chat_payload.get("messages", []):
         if not isinstance(msg, dict):
@@ -369,16 +382,44 @@ _SANITIZE_REMOVE_SECTIONS = [
 ]
 
 
+_CODEX_PROMPT_MARKERS = (
+    "<permissions instructions>",
+    "Escalation Requests",
+    "Filesystem sandboxing",
+    "sandbox_mode",
+    "require_escalated",
+    "escalated permissions",
+    "security policy",
+    "shell access",
+)
+
+
+def _looks_like_codex_prompt(content: str) -> bool:
+    """判断 system prompt 是否来自 Codex 客户端。
+
+    清洗只对 Codex 风格 prompt 生效。其他 agent（DSH、OpenClaw 等）的
+    prompt 不含这些标记，直接原样透传，避免误伤：DSH 等 harness 的
+    prompt 远超 1200 字符，一旦被兜底规则整体替换成最小安全 prompt，
+    模型会丢失全部工具使用指令，退化成纯对话。
+    """
+    if not content:
+        return False
+    return any(marker in content for marker in _CODEX_PROMPT_MARKERS)
+
+
 def _sanitize_system_content(content: str) -> str:
     """清洗 system message 内容，避免触发腾讯内容审核。
 
     策略：
+      0) 非 Codex 特征 prompt 原样返回（不改写其他客户端）
       1) 先用正则删除整段高风险文本
       2) 再逐词替换已知触发词
       3) 如果清洗后仍然过长（>1200 字符）或仍含高风险关键词，
          直接用最小安全 prompt 替换，保证不再触发审核
     """
     if not content:
+        return content
+    if not _looks_like_codex_prompt(content):
         return content
 
     result = content

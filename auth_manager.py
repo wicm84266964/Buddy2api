@@ -22,11 +22,18 @@ from typing import Optional
 import httpx
 
 import database as db
-from version import VERSION
 
 BACKEND = "https://copilot.tencent.com"
 DEFAULT_DOMAIN = "www.codebuddy.cn"
-USER_AGENT = f"buddy2api/{VERSION}"
+
+# 默认使用通用浏览器 UA，避免在请求头中自曝网关身份（原 UA 为 buddy2api/x.y.z，
+# 调用方一眼可辨）。如需自定义，设置环境变量 CB_GATEWAY_USER_AGENT。
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+USER_AGENT = os.environ.get("CB_GATEWAY_USER_AGENT") or _DEFAULT_USER_AGENT
 
 _lock = threading.Lock()
 _token_locks: dict[int, asyncio.Lock] = {}

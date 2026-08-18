@@ -2030,3 +2030,49 @@ def test_valid_headers_is_async_and_uses_decrypted_token(isolated_db):
     account = db.get_account(account_id)
     headers = asyncio.run(__import__("auth_manager").get_valid_headers(account))
     assert headers["Authorization"] == "Bearer access-secret"
+
+
+def test_codex_sanitize_skips_non_codex_prompts():
+    """DSH 等非 Codex prompt 不应被清洗或整体替换。"""
+    dsh_prompt = "You are DSH, an autonomous agent. Use tools: sandbox access, execute shell commands, filesystem. " + ("x" * 2000)
+    payload = {
+        "model": "auto",
+        "messages": [
+            {"role": "system", "content": dsh_prompt},
+            {"role": "user", "content": "run the workflow"},
+        ],
+        "tools": [{"type": "function", "function": {"name": "bash", "description": "execute shell commands"}}],
+    }
+    out = responses.apply_codex_sanitize(dict(payload))
+    assert out["messages"][0]["content"] == dsh_prompt
+    # 工具原样保留（codex 路径会过滤非 function 工具，但这里不触发清洗）
+    assert out["tools"][0]["function"]["description"] == "execute shell commands"
+
+
+def test_codex_sanitize_still_sanitizes_codex_prompts():
+    """带 Codex 特征的 prompt 仍走清洗。"""
+    codex_prompt = (
+        "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written.\n"
+        "sandbox_mode=workspace\n</permissions instructions>\n"
+        "# Escalation Requests\nYou may request escalation.\n"
+        "security policy: do not delete files. " + ("y" * 2000)
+    )
+    payload = {
+        "model": "auto",
+        "messages": [{"role": "system", "content": codex_prompt}, {"role": "user", "content": "hi"}],
+        "tools": [{"type": "function", "function": {"name": "bash", "description": "execute shell commands and sandbox"}}],
+    }
+    out = responses.apply_codex_sanitize(dict(payload))
+    cleaned = out["messages"][0]["content"]
+    assert cleaned != codex_prompt
+    assert "Filesystem sandboxing" not in cleaned
+    assert "security policy" not in cleaned
+    # Codex 特征段落被移除/清洗（本例所有特征段被删除后为空串，同样证明清洗生效）
+    assert cleaned == "" or "coding assistant" in cleaned
+
+
+def test_codex_sanitize_passthrough_without_system_prompt():
+    """无 system message 时原样返回。"""
+    payload = {"model": "auto", "messages": [{"role": "user", "content": "hello"}]}
+    out = responses.apply_codex_sanitize(dict(payload))
+    assert out == payload
