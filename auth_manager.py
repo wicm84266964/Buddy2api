@@ -22,13 +22,15 @@ from typing import Optional
 import httpx
 
 import database as db
+import fingerprint
 
 BACKEND = "https://copilot.tencent.com"
 DEFAULT_DOMAIN = "www.codebuddy.cn"
 
-# 协议逆向文档记录的历史 UA。可按需用 CB_GATEWAY_USER_AGENT 覆盖。
-_DEFAULT_USER_AGENT = "codebuddy2openai/2.0"
-USER_AGENT = os.environ.get("CB_GATEWAY_USER_AGENT") or _DEFAULT_USER_AGENT
+# 官方 Work Buddy / CodeBuddy CLI 客户端指纹（见 fingerprint.py）。
+# 兼容保留 CB_GATEWAY_USER_AGENT 覆盖；如上游不接受新 UA，
+# 设 CB_GATEWAY_USER_AGENT=codebuddy2openai/2.0 可回退到历史 UA。
+USER_AGENT = fingerprint.user_agent()
 
 _lock = threading.Lock()
 _token_locks: dict[int, asyncio.Lock] = {}
@@ -345,9 +347,7 @@ async def refresh_token(account: dict) -> bool:
     aid = account["id"]
     lock = _get_token_lock(aid)
     async with lock:
-        headers = build_headers(account)
-        headers["X-Refresh-Token"] = account.get("refresh_token", "")
-        headers["X-Auth-Refresh-Source"] = "plugin"
+        headers = build_refresh_headers(account)
         url = f"{backend_url()}/v2/plugin/auth/token/refresh"
 
         try:
@@ -402,22 +402,31 @@ async def ensure_token_valid(account: dict) -> bool:
 # Header 构造
 # ============================================================
 
+def _fingerprint_account(account: dict) -> dict:
+    """为指纹构造补齐默认 domain（不修改原 dict）。"""
+    if (account.get("domain") or "").strip():
+        return account
+    domain = str(db.get_setting("default_domain", DEFAULT_DOMAIN) or DEFAULT_DOMAIN)
+    return {**account, "domain": domain}
+
+
 def build_headers(account: dict) -> dict:
-    domain = account.get("domain") or str(db.get_setting("default_domain", DEFAULT_DOMAIN) or DEFAULT_DOMAIN)
-    return {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": f"Bearer {account.get('access_token', '')}",
-        "X-User-Id": account.get("uid", ""),
-        "X-Enterprise-Id": account.get("enterprise_id", ""),
-        "X-Tenant-Id": account.get("enterprise_id", ""),
-        "X-Domain": domain,
-        "User-Agent": USER_AGENT,
-    }
+    """Chat 请求头：官方 CLI 完整指纹（通用 + 账号 + IDE/CLI + SDK）。"""
+    return fingerprint.chat_headers(_fingerprint_account(account))
+
+
+def build_billing_headers(account: dict) -> dict:
+    """Billing 接口（余额/积分）请求头指纹。"""
+    return fingerprint.billing_headers(_fingerprint_account(account))
+
+
+def build_refresh_headers(account: dict) -> dict:
+    """Token 刷新接口请求头指纹（X-Refresh-Token 只出现在这里）。"""
+    return fingerprint.refresh_headers(_fingerprint_account(account))
 
 
 async def get_valid_headers(account: dict) -> Optional[dict]:
-    """确保 token 有效后返回 header。失败返回 None。"""
+    """确保 token 有效后返回 chat 指纹 header。失败返回 None。"""
     if not await ensure_token_valid(account):
         return None
     # 重新从数据库读取最新凭据
@@ -425,6 +434,17 @@ async def get_valid_headers(account: dict) -> Optional[dict]:
     if not fresh:
         return None
     return build_headers(fresh)
+
+
+async def get_billing_headers(account: dict) -> Optional[dict]:
+    """确保 token 有效后返回 billing 指纹 header。失败返回 None。"""
+    if not await ensure_token_valid(account):
+        return None
+    # 重新从数据库读取最新凭据
+    fresh = db.get_account(account["id"])
+    if not fresh:
+        return None
+    return build_billing_headers(fresh)
 
 
 # ============================================================
@@ -634,7 +654,7 @@ async def fetch_account_resources(
             cached["stale"] = False
             return cached
 
-    headers = await get_valid_headers(account)
+    headers = await get_billing_headers(account)
     if not headers:
         return _resource_failure(
             account,
@@ -756,7 +776,7 @@ async def fetch_checkin_status(
             cached["stale"] = False
             return cached
 
-    headers = await get_valid_headers(account)
+    headers = await get_billing_headers(account)
     if not headers:
         return _checkin_failure(
             account,
@@ -810,7 +830,7 @@ async def claim_daily_checkin(account: dict) -> dict:
     fresh = db.get_account(account["id"])
     if not fresh:
         return _checkin_result(account, ok=False, message="account not found")
-    headers = await get_valid_headers(fresh)
+    headers = await get_billing_headers(fresh)
     if not headers:
         return _checkin_result(
             account,

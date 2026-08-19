@@ -358,9 +358,25 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `CB_GATEWAY_CORS_ORIGINS` | Comma-separated browser origin allowlist; local origins by default |
 | `CB_GATEWAY_ALLOW_UNAUTHENTICATED_API` | Set to `1` to allow API calls before creating a key; disabled by default |
 | `CB_GATEWAY_SECURE_COOKIE` | Set to `1` to force the Secure flag on the admin cookie |
+| `CB_GATEWAY_USER_AGENT` | Full outgoing User-Agent; defaults to the official CLI fingerprint `CLI/2.109.2 CodeBuddy/2.109.2`; set `codebuddy2openai/2.0` to revert to the historical UA |
+| `CB_GATEWAY_IDE_VERSION` | CLI version used in the official fingerprint, default `2.109.2` |
+| `CB_GATEWAY_STAINLESS_OS` | OS reported by the official fingerprint; inferred from the current platform by default |
+| `CB_GATEWAY_STAINLESS_PACKAGE_VERSION` | Official SDK fingerprint package version, default `5.10.1` |
+| `CB_GATEWAY_NODE_VERSION` | Official SDK fingerprint Node runtime version, default `v22.13.1` |
 | `CB_AUTH_DIR` | Work Buddy / CodeBuddy auth file directory |
 | `CB_HOST_AUTH_DIR` | Host auth directory used by Docker helper scripts |
 | `CB_CONTAINER_AUTH_DIR` | Auth mount directory inside Docker, default `/auth` |
+
+## Official request fingerprint
+
+Upstream requests carry the full request-header fingerprint of the official Work Buddy / CodeBuddy CLI client (see `fingerprint.py`), matching the official client's outgoing requests:
+
+- **Common**: `X-Requested-With: XMLHttpRequest`, region-aware `Origin` / `Referer` (`www.codebuddy.cn` or `www.workbuddy.ai`), `X-Product: SaaS`, `X-Domain`, plus `X-Request-ID` / `X-B3-*` / `b3` trace headers.
+- **Chat**: `Authorization: Bearer`, `X-User-Id`, `X-Enterprise-Id`, `X-Tenant-Id`, `X-IDE-Type/Name/Version`, `x-codebuddy-request: 1`, `X-Agent-Intent: craft`, per-request `X-Conversation-*`, and the official SDK `x-stainless-*` headers.
+- **Billing**: balance / check-in endpoints use a lean fingerprint (`Authorization`, `X-User-Id`, `X-Enterprise-Id`, `X-Tenant-Id`, `X-Domain`).
+- **Refresh**: `X-Refresh-Token` only ever appears on the token-refresh endpoint, never on chat requests.
+
+Missing fields follow the official CLI convention of `X-No-*` markers (e.g. `X-No-User-Id: 1`) instead of empty values. Everything can be overridden with `CB_GATEWAY_USER_AGENT` and the other variables listed above. The fingerprint covers request headers only; if the upstream also validates TLS fingerprints (JA3), an additional TLS-impersonation forwarding layer would be required.
 
 ## Data and Security
 

@@ -358,9 +358,25 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `CB_GATEWAY_CORS_ORIGINS` | 允许的浏览器来源，逗号分隔，默认仅本机来源 |
 | `CB_GATEWAY_ALLOW_UNAUTHENTICATED_API` | 设为 `1` 时允许未创建 API Key 的业务请求，默认关闭 |
 | `CB_GATEWAY_SECURE_COOKIE` | 设为 `1` 时强制管理 Cookie 使用 Secure 标记 |
+| `CB_GATEWAY_USER_AGENT` | 出站请求完整 User-Agent；默认官方 CLI 指纹 `CLI/2.109.2 CodeBuddy/2.109.2`，可设回 `codebuddy2openai/2.0` 回退历史 UA |
+| `CB_GATEWAY_IDE_VERSION` | 官方指纹中的 CLI 版本号，默认 `2.109.2` |
+| `CB_GATEWAY_STAINLESS_OS` | 官方指纹上报的操作系统，默认按当前平台推断 |
+| `CB_GATEWAY_STAINLESS_PACKAGE_VERSION` | 官方 SDK 指纹版本号，默认 `5.10.1` |
+| `CB_GATEWAY_NODE_VERSION` | 官方 SDK 指纹 Node 运行时版本，默认 `v22.13.1` |
 | `CB_AUTH_DIR` | 指定 Work Buddy / CodeBuddy auth 文件目录 |
 | `CB_HOST_AUTH_DIR` | Docker 启动脚本使用的宿主机 auth 目录 |
 | `CB_CONTAINER_AUTH_DIR` | Docker 容器内 auth 挂载目录，默认 `/auth` |
+
+## 官方请求头指纹
+
+转发到上游的请求默认携带 Work Buddy / CodeBuddy 官方 CLI 客户端的完整请求头指纹（见 `fingerprint.py`），与官方客户端的出站请求保持一致：
+
+- **通用头**：`X-Requested-With: XMLHttpRequest`、按账号域选择的 `Origin` / `Referer`（`www.codebuddy.cn` 或 `www.workbuddy.ai`）、`X-Product: SaaS`、`X-Domain`，以及 `X-Request-ID` / `X-B3-*` / `b3` 分布式追踪头。
+- **Chat 头**：`Authorization: Bearer`、`X-User-Id`、`X-Enterprise-Id`、`X-Tenant-Id`、`X-IDE-Type/Name/Version`、`x-codebuddy-request: 1`、`X-Agent-Intent: craft`、每请求生成的 `X-Conversation-*`，以及官方 SDK 的 `x-stainless-*` 指纹头。
+- **Billing 头**：余额 / 积分接口使用精简指纹（`Authorization`、`X-User-Id`、`X-Enterprise-Id`、`X-Tenant-Id`、`X-Domain`）。
+- **Refresh 头**：`X-Refresh-Token` 只出现在 token 刷新接口，chat 请求绝不携带。
+
+字段缺失时按官方 CLI 约定发送 `X-No-*` 标记（如 `X-No-User-Id: 1`），而不是空值。以上均可用 `CB_GATEWAY_USER_AGENT` 等环境变量覆盖（见上表）。指纹只作用于请求头；如上游进一步校验 TLS 指纹（JA3），需要额外部署支持 TLS 指纹模拟的转发层。
 
 ## 数据和安全
 
