@@ -10,6 +10,7 @@ from fastapi import HTTPException
 import credential_crypto
 import database as db
 import proxy
+import reasoning_controls
 import responses
 import server
 import auth_manager
@@ -20,7 +21,10 @@ def _chat_sse(payload: dict) -> bytes:
     return f"data: {data}\n\n".encode("utf-8")
 
 
-def _collect_response_events(chunks: list[bytes]) -> list[tuple[str, dict]]:
+def _collect_response_events(
+    chunks: list[bytes],
+    resp_payload: dict | None = None,
+) -> list[tuple[str, dict]]:
     async def source():
         for chunk in chunks:
             yield chunk
@@ -31,6 +35,7 @@ def _collect_response_events(chunks: list[bytes]) -> list[tuple[str, dict]]:
             async for event in responses.chat_stream_to_responses_stream(
                 source(),
                 "test-model",
+                resp_payload,
             )
         ]
 
@@ -60,6 +65,25 @@ def test_build_backend_body_adds_configured_reasoning_default_for_deepseek(monke
     })
 
     assert body["reasoning_effort"] == "high"
+
+
+@pytest.mark.parametrize("model", ["deepseek-v4-pro", "deepseek-v4-flash"])
+def test_build_backend_body_uses_high_reasoning_default_when_unset(monkeypatch, model):
+    monkeypatch.delenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", raising=False)
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda value: value)
+
+    body = proxy.build_backend_body({"model": model, "messages": []})
+
+    assert body["reasoning_effort"] == "high"
+
+
+def test_build_backend_body_allows_reasoning_default_to_be_disabled(monkeypatch):
+    monkeypatch.setenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "off")
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda value: value)
+
+    body = proxy.build_backend_body({"model": "deepseek-v4-pro", "messages": []})
+
+    assert "reasoning_effort" not in body
 
 
 def test_build_backend_body_maps_developer_messages_to_system(monkeypatch):
@@ -99,8 +123,23 @@ def test_build_backend_body_does_not_add_reasoning_default_to_other_models(monke
     assert "reasoning_effort" not in body
 
 
-@pytest.mark.parametrize("explicit", ["none", "off", "low", "max"])
-def test_build_backend_body_preserves_explicit_reasoning_effort(monkeypatch, explicit):
+@pytest.mark.parametrize(
+    ("explicit", "expected"),
+    [
+        ("minimal", "low"),
+        ("low", "low"),
+        ("medium", "high"),
+        ("high", "high"),
+        ("xhigh", "max"),
+        ("max", "max"),
+        ("ultra", "max"),
+    ],
+)
+def test_build_backend_body_projects_standard_reasoning_effort(
+    monkeypatch,
+    explicit,
+    expected,
+):
     monkeypatch.setenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "high")
     monkeypatch.setattr(proxy, "resolve_model_alias", lambda model: model)
 
@@ -110,10 +149,43 @@ def test_build_backend_body_preserves_explicit_reasoning_effort(monkeypatch, exp
         "reasoning_effort": explicit,
     })
 
+    assert body["reasoning_effort"] == expected
+
+
+@pytest.mark.parametrize("explicit", ["none", "off"])
+def test_build_backend_body_disables_reasoning_without_reinjecting_default(
+    monkeypatch,
+    explicit,
+):
+    monkeypatch.setenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "high")
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda model: model)
+
+    body = proxy.build_backend_body({
+        "model": "deepseek-v4-flash",
+        "messages": [],
+        "reasoning_effort": explicit,
+    })
+
+    assert "reasoning_effort" not in body
+
+
+@pytest.mark.parametrize("explicit", ["none", "minimal", "medium", "xhigh", "ultra"])
+def test_build_backend_body_preserves_explicit_effort_for_other_models(
+    monkeypatch,
+    explicit,
+):
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda value: value)
+
+    body = proxy.build_backend_body({
+        "model": "glm-5.2",
+        "messages": [],
+        "reasoning_effort": explicit,
+    })
+
     assert body["reasoning_effort"] == explicit
 
 
-def test_build_backend_body_ignores_unsupported_thinking_without_injecting_default(monkeypatch):
+def test_build_backend_body_maps_disabled_thinking_without_injecting_default(monkeypatch):
     monkeypatch.setenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "high")
     monkeypatch.setattr(proxy, "resolve_model_alias", lambda model: model)
     thinking = {"type": "disabled"}
@@ -126,6 +198,93 @@ def test_build_backend_body_ignores_unsupported_thinking_without_injecting_defau
 
     assert "thinking" not in body
     assert "reasoning_effort" not in body
+
+
+@pytest.mark.parametrize("thinking", [{"type": "enabled"}, {"type": "adaptive"}])
+def test_build_backend_body_maps_enabled_thinking_to_high(monkeypatch, thinking):
+    monkeypatch.setenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "off")
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda model: model)
+
+    body = proxy.build_backend_body({
+        "model": "deepseek-v4-pro",
+        "messages": [],
+        "thinking": thinking,
+    })
+
+    assert body["reasoning_effort"] == "high"
+
+
+def test_chat_reasoning_effort_overrides_lower_priority_disable_switch():
+    normalized = reasoning_controls.normalize_chat_reasoning({
+        "reasoning_effort": "high",
+        "thinking": {"type": "disabled"},
+    })
+
+    assert normalized["reasoning_effort"] == "high"
+
+
+def test_output_config_effort_overrides_cross_object_thinking_disable():
+    normalized = reasoning_controls.normalize_chat_reasoning({
+        "output_config": {"effort": "high"},
+        "thinking": {"type": "disabled"},
+    })
+
+    assert normalized["reasoning_effort"] == "high"
+
+
+def test_higher_priority_switch_overrides_cross_dialect_switch():
+    normalized = reasoning_controls.normalize_chat_reasoning({
+        "thinking": {"type": "enabled"},
+        "enable_thinking": False,
+    })
+
+    assert normalized["reasoning_effort"] == "high"
+
+
+def test_reasoning_control_rejects_conflict_inside_native_object():
+    with pytest.raises(reasoning_controls.InvalidReasoningControl):
+        reasoning_controls.normalize_chat_reasoning({
+            "reasoning": {"effort": "high", "enabled": False},
+        })
+
+
+def test_default_reasoning_value_defers_to_lower_priority_explicit_switch():
+    normalized = reasoning_controls.normalize_chat_reasoning({
+        "reasoning_effort": "default",
+        "thinking": {"type": "disabled"},
+    })
+
+    assert normalized["reasoning_effort"] == "none"
+
+
+def test_reasoning_normalization_preserves_extensions_and_budget_idempotently():
+    payload = {
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 4096,
+            "display": "hidden",
+        },
+        "reasoning": {
+            "exclude": True,
+            "max_tokens": 8192,
+        },
+    }
+
+    normalized = reasoning_controls.normalize_chat_reasoning(payload)
+    normalized_again = reasoning_controls.normalize_chat_reasoning(normalized)
+
+    assert normalized["reasoning_effort"] == "high"
+    assert normalized["thinking"] == {
+        "budget_tokens": 4096,
+        "display": "hidden",
+    }
+    assert normalized["reasoning"] == {
+        "exclude": True,
+        "max_tokens": 8192,
+    }
+    assert normalized_again == normalized
+    control = reasoning_controls.resolve_reasoning_control(payload)
+    assert control.budget_tokens == 4096
 
 
 def _collect_chat_proxy_stream(
@@ -481,11 +640,195 @@ def test_api_auth_fails_closed_without_keys(isolated_db, monkeypatch):
     assert error.value.status_code == 503
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "payload"),
+    [
+        (
+            server.chat_completions,
+            {
+                "model": "auto",
+                "messages": [{"role": "user", "content": "hello"}],
+                "reasoning_effort": {"level": "high"},
+            },
+        ),
+        (
+            server.resp_responses,
+            {
+                "model": "auto",
+                "input": "hello",
+                "reasoning": {"effort": 42},
+            },
+        ),
+    ],
+)
+def test_http_endpoints_reject_invalid_reasoning_controls(
+    monkeypatch,
+    endpoint,
+    payload,
+):
+    class FakeRequest:
+        async def stream(self):
+            yield json.dumps(payload).encode("utf-8")
+
+    monkeypatch.setattr(
+        server,
+        "_check_client_auth",
+        lambda *_args, **_kwargs: {"default_channel": "workbuddy"},
+    )
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(endpoint(FakeRequest(), "Bearer test", None))
+
+    assert error.value.status_code == 400
+    assert error.value.detail["error"]["code"] == "invalid_reasoning_control"
+
+
 def test_responses_input_image_string_is_preserved():
     flattened = responses._flatten_content(
         [{"type": "input_image", "image_url": "data:image/png;base64,abc"}]
     )
     assert "data:image/png;base64,abc" in flattened
+
+
+@pytest.mark.parametrize(
+    "effort",
+    ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+)
+def test_responses_to_chat_maps_reasoning_effort_without_mutating_input(effort):
+    payload = {
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning": {"effort": effort},
+    }
+    original = json.loads(json.dumps(payload))
+
+    chat_payload = responses.responses_to_chat(payload)
+
+    assert chat_payload["reasoning_effort"] == effort
+    assert payload == original
+
+
+@pytest.mark.parametrize(
+    ("compatibility_fields", "expected"),
+    [
+        ({"reasoningEffort": "medium"}, "medium"),
+        ({"thinking": {"type": "enabled"}}, "high"),
+        ({"thinking": {"type": "disabled"}}, "none"),
+        ({"enable_thinking": True}, "high"),
+        ({"enable_thinking": False}, "none"),
+        (
+            {"thinking": {"type": "adaptive"}, "output_config": {"effort": "xhigh"}},
+            "xhigh",
+        ),
+    ],
+)
+def test_responses_to_chat_accepts_agent_reasoning_compatibility_forms(
+    compatibility_fields,
+    expected,
+):
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        **compatibility_fields,
+    })
+
+    assert chat_payload["reasoning_effort"] == expected
+
+
+def test_responses_to_chat_maps_reasoning_summary():
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning": {"effort": "high", "summary": "detailed"},
+    })
+
+    assert chat_payload["reasoning_summary"] == "detailed"
+
+
+def test_responses_to_chat_preserves_reasoning_budget_extensions():
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 4096,
+            "display": "hidden",
+        },
+    })
+
+    assert chat_payload["reasoning_effort"] == "high"
+    assert chat_payload["thinking"] == {
+        "budget_tokens": 4096,
+        "display": "hidden",
+    }
+
+
+def test_responses_reasoning_effort_overrides_backend_default(monkeypatch):
+    monkeypatch.setenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "high")
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda value: value)
+
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning": {"effort": "low"},
+    })
+    body = proxy.build_backend_body(chat_payload)
+
+    assert body["reasoning_effort"] == "low"
+
+
+def test_responses_uses_backend_reasoning_default_when_effort_is_omitted(monkeypatch):
+    monkeypatch.delenv("CB_GATEWAY_DEFAULT_REASONING_EFFORT", raising=False)
+    monkeypatch.setattr(proxy, "resolve_model_alias", lambda value: value)
+
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-flash",
+        "input": "hello",
+    })
+    body = proxy.build_backend_body(chat_payload)
+
+    assert body["reasoning_effort"] == "high"
+
+
+def test_responses_to_chat_accepts_top_level_reasoning_effort():
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning_effort": "max",
+    })
+
+    assert chat_payload["reasoning_effort"] == "max"
+
+
+def test_responses_nested_reasoning_effort_takes_precedence():
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning": {"effort": "low"},
+        "reasoning_effort": "max",
+    })
+
+    assert chat_payload["reasoning_effort"] == "low"
+
+
+def test_responses_nested_disable_overrides_top_level_enable():
+    chat_payload = responses.responses_to_chat({
+        "model": "deepseek-v4-pro",
+        "input": "hello",
+        "reasoning": {"effort": "none"},
+        "reasoning_effort": "high",
+    })
+
+    assert chat_payload["reasoning_effort"] == "none"
+
+
+def test_chat_top_level_disable_overrides_nested_enable():
+    chat_payload = reasoning_controls.normalize_chat_reasoning({
+        "reasoning_effort": "none",
+        "reasoning": {"effort": "high"},
+    })
+
+    assert chat_payload["reasoning_effort"] == "none"
 
 
 def test_responses_to_chat_groups_parallel_function_calls_across_reasoning_items():
@@ -628,6 +971,45 @@ def test_responses_stream_reassembles_byte_split_tool_arguments():
     assert len(sequence_numbers) == len(set(sequence_numbers))
 
 
+def test_responses_stream_snapshots_include_request_fields_and_usage_details():
+    request_tool = {
+        "type": "function",
+        "name": "lookup",
+        "description": "Look up a value",
+        "parameters": {"type": "object", "properties": {}},
+    }
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "done"},
+                "finish_reason": "stop",
+            }],
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 8,
+                "total_tokens": 20,
+                "prompt_tokens_details": {"cached_tokens": 5},
+                "completion_tokens_details": {"reasoning_tokens": 6},
+            },
+        }),
+        b"data: [DONE]\n\n",
+    ], {
+        "parallel_tool_calls": False,
+        "tool_choice": "required",
+        "tools": [request_tool],
+    })
+
+    for event_name in ("response.created", "response.in_progress", "response.completed"):
+        snapshot = _events_of_type(events, event_name)[0]["response"]
+        assert snapshot["parallel_tool_calls"] is False
+        assert snapshot["tool_choice"] == "required"
+        assert snapshot["tools"] == [request_tool]
+    usage = _events_of_type(events, "response.completed")[0]["response"]["usage"]
+    assert usage["input_tokens_details"] == {"cached_tokens": 5}
+    assert usage["output_tokens_details"] == {"reasoning_tokens": 6}
+
+
 def test_responses_stream_keeps_parallel_tool_calls_separate():
     chunks = [
         _chat_sse({
@@ -721,7 +1103,7 @@ def test_responses_stream_fails_on_unexpected_eof_with_partial_tool_call():
     failed = _events_of_type(events, "response.failed")
     output_done = _events_of_type(events, "response.output_item.done")
     assert len(failed) == 1
-    assert failed[0]["response"]["error"]["code"] == "upstream_stream_ended"
+    assert failed[0]["response"]["error"]["code"] == "server_error"
     assert output_done[0]["item"]["status"] == "incomplete"
     assert not _events_of_type(events, "response.function_call_arguments.done")
     assert not _events_of_type(events, "response.completed")
@@ -806,11 +1188,319 @@ def test_responses_stream_emits_complete_text_lifecycle():
     assert completed["output"][0]["content"][0]["text"] == "hello"
 
 
+def test_responses_stream_orders_reasoning_before_text_and_tool():
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "think-"},
+                "finish_reason": None,
+            }],
+        }),
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "more", "content": "answer"},
+                "finish_reason": None,
+            }],
+        }),
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"tool_calls": [{
+                    "index": 0,
+                    "id": "call_test",
+                    "function": {"name": "test_tool", "arguments": '{"ok":true}'},
+                }]},
+                "finish_reason": "tool_calls",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    names = [name for name, _ in events]
+    added = _events_of_type(events, "response.output_item.added")
+    assert [item["item"]["type"] for item in added] == [
+        "reasoning",
+        "message",
+        "function_call",
+    ]
+    assert [item["output_index"] for item in added] == [0, 1, 2]
+
+    reasoning_id = added[0]["item"]["id"]
+    reasoning_events = [
+        payload
+        for name, payload in events
+        if name.startswith("response.reasoning_summary_")
+    ]
+    assert all(event["item_id"] == reasoning_id for event in reasoning_events)
+    assert all(event["output_index"] == 0 for event in reasoning_events)
+    assert all(event["summary_index"] == 0 for event in reasoning_events)
+    assert [
+        event["delta"]
+        for event in _events_of_type(events, "response.reasoning_summary_text.delta")
+    ] == ["think-", "more"]
+    assert _events_of_type(events, "response.reasoning_summary_text.done")[0]["text"] == "think-more"
+
+    assert names.index("response.reasoning_summary_text.done") < names.index(
+        "response.reasoning_summary_part.done"
+    )
+    reasoning_done_index = next(
+        index
+        for index, (name, payload) in enumerate(events)
+        if name == "response.output_item.done" and payload["item"]["type"] == "reasoning"
+    )
+    message_added_index = next(
+        index
+        for index, (name, payload) in enumerate(events)
+        if name == "response.output_item.added" and payload["item"]["type"] == "message"
+    )
+    message_done_index = next(
+        index
+        for index, (name, payload) in enumerate(events)
+        if name == "response.output_item.done" and payload["item"]["type"] == "message"
+    )
+    tool_added_index = next(
+        index
+        for index, (name, payload) in enumerate(events)
+        if name == "response.output_item.added" and payload["item"]["type"] == "function_call"
+    )
+    assert reasoning_done_index < message_added_index
+    assert message_done_index < tool_added_index
+
+    completed = _events_of_type(events, "response.completed")[0]["response"]
+    assert [item["type"] for item in completed["output"]] == [
+        "reasoning",
+        "message",
+        "function_call",
+    ]
+    assert completed["output"][0]["summary"][0]["text"] == "think-more"
+    sequence_numbers = [payload["sequence_number"] for _, payload in events]
+    assert sequence_numbers == list(range(len(events)))
+
+
+def test_responses_stream_accepts_reasoning_only_completed_choice():
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "internal "},
+                "finish_reason": None,
+            }],
+        }),
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "only"},
+                "finish_reason": "stop",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    assert not _events_of_type(events, "response.failed")
+    assert not _events_of_type(events, "response.output_text.delta")
+    completed = _events_of_type(events, "response.completed")[0]["response"]
+    assert [item["type"] for item in completed["output"]] == ["reasoning"]
+    assert completed["output"][0]["summary"] == [
+        {"type": "summary_text", "text": "internal only"}
+    ]
+    names = [name for name, _ in events]
+    assert names.count("response.reasoning_summary_text.done") == 1
+    assert names.count("response.reasoning_summary_part.done") == 1
+    assert names.count("response.output_item.done") == 1
+    assert names.index("response.reasoning_summary_text.done") < names.index(
+        "response.reasoning_summary_part.done"
+    ) < names.index("response.output_item.done") < names.index("response.completed")
+
+
+def test_responses_stream_deduplicates_cross_chunk_reasoning_fallback():
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "same text"},
+                "finish_reason": None,
+            }],
+        }),
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"content": "same text"},
+                "finish_reason": "stop",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    completed = _events_of_type(events, "response.completed")[0]["response"]
+    assert [item["type"] for item in completed["output"]] == ["reasoning"]
+    assert not _events_of_type(events, "response.output_text.delta")
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "incomplete_reason"),
+    [("length", "max_output_tokens"), ("content_filter", "content_filter")],
+)
+def test_responses_stream_closes_reasoning_when_incomplete(
+    finish_reason,
+    incomplete_reason,
+):
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "partial reasoning"},
+                "finish_reason": finish_reason,
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    output_done = _events_of_type(events, "response.output_item.done")[0]
+    incomplete = _events_of_type(events, "response.incomplete")[0]["response"]
+    names = [name for name, _ in events]
+    assert output_done["item"]["status"] == "incomplete"
+    assert output_done["item"]["summary"][0]["text"] == "partial reasoning"
+    assert incomplete["incomplete_details"] == {"reason": incomplete_reason}
+    assert _events_of_type(events, "response.reasoning_summary_text.done")[0]["text"] == (
+        "partial reasoning"
+    )
+    assert names.index("response.reasoning_summary_text.done") < names.index(
+        "response.reasoning_summary_part.done"
+    ) < names.index("response.output_item.done") < names.index("response.incomplete")
+    assert not _events_of_type(events, "response.failed")
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        _chat_sse({"error": {"message": "failed", "code": "upstream_failed"}}),
+        b"",
+    ],
+)
+def test_responses_stream_closes_reasoning_before_failure(tail):
+    chunks = [_chat_sse({
+        "choices": [{
+            "index": 0,
+            "delta": {"reasoning_content": "partial reasoning"},
+            "finish_reason": None,
+        }],
+    })]
+    if tail:
+        chunks.append(tail)
+    events = _collect_response_events(chunks)
+
+    names = [name for name, _ in events]
+    output_done = _events_of_type(events, "response.output_item.done")[0]
+    failed = _events_of_type(events, "response.failed")[0]["response"]
+    assert output_done["item"]["status"] == "incomplete"
+    assert failed["error"]["code"] == "server_error"
+    assert names.index("response.reasoning_summary_text.done") < names.index(
+        "response.reasoning_summary_part.done"
+    ) < names.index("response.output_item.done") < names.index("response.failed")
+
+
+def test_responses_stream_keeps_reasoning_choices_separate():
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [
+                {"index": 1, "delta": {"reasoning_content": "one"}, "finish_reason": "stop"},
+                {"index": 0, "delta": {"reasoning_content": "zero-a"}, "finish_reason": None},
+            ],
+        }),
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "zero-b"},
+                "finish_reason": "stop",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    added = [
+        payload
+        for payload in _events_of_type(events, "response.output_item.added")
+        if payload["item"]["type"] == "reasoning"
+    ]
+    assert len(added) == 2
+    assert len({payload["item"]["id"] for payload in added}) == 2
+    assert [payload["output_index"] for payload in added] == [0, 1]
+    completed = _events_of_type(events, "response.completed")[0]["response"]
+    assert [item["summary"][0]["text"] for item in completed["output"]] == [
+        "one",
+        "zero-azero-b",
+    ]
+    assert len(_events_of_type(events, "response.reasoning_summary_text.done")) == 2
+    assert len(_events_of_type(events, "response.reasoning_summary_part.done")) == 2
+
+
+@pytest.mark.parametrize(
+    ("first_delta", "output_type"),
+    [
+        ({"content": "answer started"}, "message"),
+        ({
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_started",
+                "function": {"name": "tool", "arguments": "{}"},
+            }],
+        }, "function_call"),
+    ],
+)
+def test_responses_stream_rejects_reasoning_after_output_started(
+    first_delta,
+    output_type,
+):
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": first_delta,
+                "finish_reason": None,
+            }],
+        }),
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "too late"},
+                "finish_reason": "stop",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    failed = _events_of_type(events, "response.failed")[0]["response"]
+    assert failed["error"]["code"] == "server_error"
+    assert "reasoning after answer or tool output" in failed["error"]["message"]
+    assert [item["type"] for item in failed["output"]] == [output_type]
+    assert failed["output"][0]["status"] == "incomplete"
+    assert not _events_of_type(events, "response.reasoning_summary_text.delta")
+
+
+def test_responses_stream_coerces_truthy_non_string_reasoning_delta():
+    events = _collect_response_events([
+        _chat_sse({
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": 42},
+                "finish_reason": "stop",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ])
+
+    delta = _events_of_type(events, "response.reasoning_summary_text.delta")[0]
+    completed = _events_of_type(events, "response.completed")[0]["response"]
+    assert delta["delta"] == "42"
+    assert completed["output"][0]["summary"][0]["text"] == "42"
+
+
 @pytest.mark.parametrize(
     ("delta", "finish_reason"),
     [
         ({}, "stop"),
-        ({"reasoning_content": "internal only"}, "stop"),
         ({}, None),
     ],
 )
@@ -824,7 +1514,7 @@ def test_responses_stream_rejects_completed_choice_without_output(delta, finish_
 
     failed = _events_of_type(events, "response.failed")
     assert len(failed) == 1
-    assert failed[0]["response"]["error"]["code"] == "empty_upstream_response"
+    assert failed[0]["response"]["error"]["code"] == "server_error"
     assert not _events_of_type(events, "response.completed")
 
 
@@ -840,7 +1530,7 @@ def test_responses_stream_fails_when_only_one_choice_finishes_before_eof():
 
     failed = _events_of_type(events, "response.failed")
     assert len(failed) == 1
-    assert failed[0]["response"]["error"]["code"] == "upstream_stream_ended"
+    assert failed[0]["response"]["error"]["code"] == "server_error"
     assert not _events_of_type(events, "response.completed")
 
 
@@ -920,6 +1610,28 @@ def test_chat_proxy_stream_rejects_terminal_without_content(monkeypatch):
     _assert_chat_proxy_error_only(raw)
 
 
+def test_chat_proxy_stream_accepts_reasoning_only_terminal(monkeypatch):
+    raw = _collect_chat_proxy_stream([
+        _chat_sse({
+            "id": "chatcmpl-reasoning",
+            "object": "chat.completion.chunk",
+            "created": 123,
+            "model": "test-model",
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "internal only"},
+                "finish_reason": "stop",
+            }],
+        }),
+        b"data: [DONE]\n\n",
+    ], monkeypatch)
+
+    payloads, done_count = _parse_chat_proxy_sse(raw)
+    assert not any(payload.get("error") for payload in payloads)
+    assert payloads[0]["choices"][0]["delta"]["reasoning_content"] == "internal only"
+    assert done_count == 1
+
+
 def test_non_stream_chat_conversion_rejects_empty_completed_response():
     converted = responses.chat_response_to_responses({
         "id": "chatcmpl-empty",
@@ -934,11 +1646,79 @@ def test_non_stream_chat_conversion_rejects_empty_completed_response():
 
     assert converted["status"] == "failed"
     assert converted["output"] == []
-    assert converted["error"]["code"] == "empty_upstream_response"
+    assert converted["error"]["code"] == "server_error"
 
 
-@pytest.mark.parametrize("delta", [{}, {"reasoning_content": "internal only"}])
-def test_non_stream_aggregator_rejects_terminal_without_output(monkeypatch, delta):
+def test_non_stream_chat_conversion_orders_reasoning_before_text():
+    converted = responses.chat_response_to_responses({
+        "id": "chatcmpl-reasoning",
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "reasoning_content": "analysis",
+                "content": "answer",
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {},
+    }, "test-model")
+
+    assert converted["status"] == "completed"
+    assert [item["type"] for item in converted["output"]] == ["reasoning", "message"]
+    assert converted["output"][0]["summary"][0]["text"] == "analysis"
+
+
+def test_non_stream_chat_conversion_includes_required_response_fields_and_usage_details():
+    converted = responses.chat_response_to_responses({
+        "id": "chatcmpl-details",
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": "answer"},
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": 9,
+            "completion_tokens": 4,
+            "total_tokens": 13,
+            "prompt_tokens_details": {"cached_tokens": 3},
+            "completion_tokens_details": {"reasoning_tokens": 2},
+        },
+    }, "test-model", {
+        "parallel_tool_calls": False,
+        "tool_choice": "none",
+        "tools": [],
+    })
+
+    assert converted["parallel_tool_calls"] is False
+    assert converted["tool_choice"] == "none"
+    assert converted["tools"] == []
+    assert converted["usage"]["input_tokens_details"] == {"cached_tokens": 3}
+    assert converted["usage"]["output_tokens_details"] == {"reasoning_tokens": 2}
+
+
+def test_non_stream_chat_conversion_deduplicates_reasoning_fallback_content():
+    converted = responses.chat_response_to_responses({
+        "id": "chatcmpl-reasoning",
+        "model": "test-model",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "reasoning_content": "analysis",
+                "content": "analysis",
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {},
+    }, "test-model")
+
+    assert [item["type"] for item in converted["output"]] == ["reasoning"]
+
+
+def _collect_non_stream_upstream(monkeypatch, delta):
     payload = {
         "id": "chatcmpl-empty",
         "object": "chat.completion.chunk",
@@ -975,7 +1755,7 @@ def test_non_stream_aggregator_rejects_terminal_without_output(monkeypatch, delt
     monkeypatch.setattr(proxy.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(auth_manager, "request_timeout", lambda _default: 30)
 
-    result = asyncio.run(proxy._collect_stream(
+    return asyncio.run(proxy._collect_stream(
         "https://upstream.test/v2/chat/completions",
         {"Authorization": "Bearer test"},
         {"model": "test-model", "stream": True},
@@ -985,9 +1765,25 @@ def test_non_stream_aggregator_rejects_terminal_without_output(monkeypatch, delt
         0,
     ))
 
+
+def test_non_stream_aggregator_rejects_terminal_without_output(monkeypatch):
+    result = _collect_non_stream_upstream(monkeypatch, {})
+
     assert result[0] == "error"
     assert result[1][0] == 502
     assert "without content" in result[1][1]["error"]["message"]
+
+
+def test_non_stream_aggregator_accepts_reasoning_only_output(monkeypatch):
+    result = _collect_non_stream_upstream(
+        monkeypatch,
+        {"reasoning_content": "internal only"},
+    )
+
+    assert result[0] == "json"
+    message = result[1]["choices"][0]["message"]
+    assert message["content"] is None
+    assert message["reasoning_content"] == "internal only"
 
 
 def test_chat_proxy_stream_normalizes_empty_finish_reason(monkeypatch):

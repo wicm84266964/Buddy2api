@@ -10,6 +10,7 @@ import httpx
 
 import auth_manager
 import database as db
+from reasoning_controls import normalize_chat_reasoning
 from providers.qclaw.constants import AIZONE_BASE, ALIASES, CHANNEL_ID, RETRYABLE_STATUS
 from providers.qclaw.sign import aizone_headers
 
@@ -44,6 +45,8 @@ def fill_empty_content(payload: dict) -> dict:
     for key in ("reasoning_content", "reasoning"):
         text = _alt_text(out.get(key))
         if text:
+            if key == "reasoning":
+                out["reasoning_content"] = text
             out["content"] = text
             return out
     return out
@@ -105,7 +108,7 @@ def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, tota
 
 
 def _build_body(payload: dict) -> tuple[dict, str]:
-    body = dict(payload)
+    body = normalize_chat_reasoning(payload)
     body["model"] = translate_model(str(body.get("model") or "default"))
     raw = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     return body, raw

@@ -20,6 +20,11 @@ import httpx
 
 import database as db
 import auth_manager
+from reasoning_controls import (
+    chat_reasoning_effort,
+    resolve_reasoning_control,
+    workbuddy_reasoning_effort,
+)
 
 BACKEND = "https://copilot.tencent.com"
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
@@ -126,6 +131,7 @@ _REASONING_DEFAULT_MODEL_IDS = frozenset({
     "deepseek-v4-pro",
     "deepseek-v4-flash",
 })
+_DEFAULT_REASONING_EFFORT = "high"
 _VALID_REASONING_DEFAULTS = frozenset({"low", "high", "max"})
 _BACKEND_ROLE_ALIASES = {
     "developer": "system",
@@ -195,14 +201,18 @@ def resolve_model_alias(model: str) -> str:
 
 
 def _configured_reasoning_default(model: str) -> str | None:
-    """Return the opt-in reasoning default for supported DeepSeek V4 models."""
+    """Return the configured reasoning default for supported DeepSeek V4 models."""
     if model not in _REASONING_DEFAULT_MODEL_IDS:
         return None
-    value = os.environ.get("CB_GATEWAY_DEFAULT_REASONING_EFFORT", "").strip().lower()
+    value = os.environ.get(
+        "CB_GATEWAY_DEFAULT_REASONING_EFFORT",
+        _DEFAULT_REASONING_EFFORT,
+    ).strip().lower()
     return value if value in _VALID_REASONING_DEFAULTS else None
 
 
 def build_backend_body(payload: dict) -> dict:
+    reasoning_control = resolve_reasoning_control(payload)
     body = {k: payload[k] for k in PASSTHROUGH_BODY_KEYS if k in payload}
     messages = body.get("messages")
     if isinstance(messages, list):
@@ -215,14 +225,21 @@ def build_backend_body(payload: dict) -> dict:
             else message
             for message in messages
         ]
-    has_explicit_thinking = "thinking" in payload
     # Resolve model alias before forwarding
     raw_model = body.get("model", "auto")
     body["model"] = resolve_model_alias(raw_model)
-    if "reasoning_effort" not in body and not has_explicit_thinking:
+    body.pop("reasoning_effort", None)
+    if reasoning_control.mode == "default":
         default_reasoning = _configured_reasoning_default(body["model"])
         if default_reasoning:
             body["reasoning_effort"] = default_reasoning
+    else:
+        if body["model"] in _REASONING_DEFAULT_MODEL_IDS:
+            reasoning_effort = workbuddy_reasoning_effort(reasoning_control)
+        else:
+            reasoning_effort = chat_reasoning_effort(reasoning_control)
+        if reasoning_effort:
+            body["reasoning_effort"] = reasoning_effort
     body["stream"] = True
     if "stream_options" not in body:
         body["stream_options"] = {"include_usage": True}
@@ -283,6 +300,7 @@ class _ChatStreamObserver:
         self.finish_reasons: dict[int, str | None] = {}
         self.closed_choices: set[int] = set()
         self.content_choices: set[int] = set()
+        self.reasoning_choices: set[int] = set()
         self.tool_call_choices: set[int] = set()
         self.tool_calls: dict[tuple[int, int], dict] = {}
         self.malformed_data_event = False
@@ -423,6 +441,8 @@ class _ChatStreamObserver:
             if content:
                 self.content_parts.append(content)
                 self.content_choices.add(index)
+            if delta.get("reasoning_content"):
+                self.reasoning_choices.add(index)
             tool_deltas = delta.get("tool_calls")
             if tool_deltas is None:
                 continue
@@ -505,9 +525,10 @@ class _ChatStreamObserver:
             if (
                 reason not in {"length", "content_filter"}
                 and choice_index not in self.content_choices
+                and choice_index not in self.reasoning_choices
                 and choice_index not in self.tool_call_choices
             ):
-                return "The upstream choice ended without content or a tool call."
+                return "The upstream choice ended without content, reasoning, or a tool call."
         return None
 
     def terminal_event(self, choice_indices: list[int]) -> bytes:
@@ -1141,6 +1162,7 @@ async def _collect_stream(
 
     if (
         not content_parts
+        and not reasoning_parts
         and not tool_calls
         and finish_reason not in {"length", "content_filter"}
     ):
@@ -1148,7 +1170,7 @@ async def _collect_stream(
             "error",
             (502, {
                 "error": {
-                    "message": "The upstream choice ended without content or a tool call.",
+                    "message": "The upstream choice ended without content, reasoning, or a tool call.",
                     "type": "upstream_error",
                 },
             }),

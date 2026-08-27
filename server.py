@@ -35,6 +35,11 @@ import router
 import control_plane
 from providers.protocol import KNOWN_CHANNEL_SET
 from providers.qclaw.store import default_guid, upsert_account as upsert_qclaw_account
+from reasoning_controls import (
+    InvalidReasoningControl,
+    normalize_chat_reasoning,
+    resolve_reasoning_control,
+)
 from version import VERSION
 
 
@@ -231,6 +236,19 @@ async def _read_json_object(request: Request, *, allow_empty: bool = False) -> d
     return data
 
 
+def _invalid_reasoning_http(exc: InvalidReasoningControl) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": str(exc),
+                "type": "invalid_request_error",
+                "code": "invalid_reasoning_control",
+            }
+        },
+    )
+
+
 async def _gather_limited(accounts: list[dict], operation, limit: int = 4) -> list[dict]:
     semaphore = asyncio.Semaphore(max(1, limit))
 
@@ -328,6 +346,10 @@ async def chat_completions(
         raise HTTPException(status_code=400, detail={"error": {"message": "messages is required", "type": "invalid_request_error"}})
     if "model" in payload and not isinstance(payload["model"], str):
         raise HTTPException(status_code=400, detail={"error": {"message": "model must be a string", "type": "invalid_request_error"}})
+    try:
+        payload = normalize_chat_reasoning(payload)
+    except InvalidReasoningControl as exc:
+        raise _invalid_reasoning_http(exc) from exc
     # Codex 类型 Key：自动应用内容清洗 + 工具过滤
     if api_key_info and api_key_info.get("client_type") == "codex":
         payload = responses.apply_codex_sanitize(payload)
@@ -370,18 +392,16 @@ async def resp_responses(
         )
     if "model" in payload and not isinstance(payload["model"], str):
         raise HTTPException(status_code=400, detail={"error": {"message": "model must be a string", "type": "invalid_request_error"}})
+    try:
+        resolve_reasoning_control(payload, prefer_nested=True)
+    except InvalidReasoningControl as exc:
+        raise _invalid_reasoning_http(exc) from exc
     bound = router.bind_http(payload, api_key_info)
     _check_model_access(api_key_info, bound.original, bound.inner, bound.channel)
     await router.ensure_usable(bound.channel)
     await run_in_threadpool(_reserve_client_quota, api_key_info)
-    dispatch = router.dispatch_payload(payload, bound.inner)
-    info = dict(api_key_info or {})
-    info["_log_model"] = bound.original
-    info["_bind_channel"] = bound.channel
-
     try:
-        result = await responses.proxy_responses(dispatch, info)
-        result = await router.echo_original(result, bound.original)
+        result = await router.responses_after_bind(bound, payload, api_key_info)
     except Exception as e:
         import traceback
         sys.stderr.write(f"[responses] ERROR: {e}\n{traceback.format_exc()}\n")

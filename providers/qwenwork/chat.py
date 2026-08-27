@@ -11,6 +11,7 @@ import httpx
 
 import auth_manager
 import database as db
+from reasoning_controls import resolve_reasoning_control
 from providers.qwenwork import cosy
 from providers.qwenwork.constants import (
     ALIASES,
@@ -118,6 +119,8 @@ def build_body(payload: dict) -> tuple[dict, str, str]:
     if system:
         messages = [{"role": "system", "content": system}, *messages]
     last_user = _last_user_text(messages)
+    reasoning_control = resolve_reasoning_control(payload)
+    is_reasoning = reasoning_control.enabled is True
     parameters = {}
     for key in ("temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty"):
         if key in payload and payload[key] is not None:
@@ -136,7 +139,7 @@ def build_body(payload: dict) -> tuple[dict, str, str]:
             "features": [],
             "extra": {
                 "context": [],
-                "modelConfig": {"key": model, "is_reasoning": False},
+                "modelConfig": {"key": model, "is_reasoning": is_reasoning},
                 "originalContent": last_user,
             },
             "chatPrompt": "",
@@ -156,7 +159,7 @@ def build_body(payload: dict) -> tuple[dict, str, str]:
             "model": "",
             "format": "openai",
             "is_vl": model == "qwork-advanced",
-            "is_reasoning": False,
+            "is_reasoning": is_reasoning,
             "api_key": "",
             "url": "",
             "source": "system",
