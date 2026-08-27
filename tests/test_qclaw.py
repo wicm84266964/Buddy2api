@@ -10,7 +10,7 @@ import providers
 import router
 from providers.protocol import KeyChannelMismatch, UnknownChannel, UnknownModel
 from providers.qclaw.constants import JPRX_SIGNATURE_KEY, STATIC_MODELS
-from providers.qclaw.chat import fill_empty_content
+from providers.qclaw.chat import _build_body, fill_empty_content
 from providers.qclaw.sign import aizone_headers, jprx_ctx
 from providers.qclaw.store import parse_credentials, qclaw_auth_dirs
 
@@ -52,6 +52,28 @@ def test_fill_empty_content_uses_reasoning():
     assert filled["content"] == "你好"
     kept = fill_empty_content({"role": "assistant", "content": "可见", "reasoning_content": "隐藏"})
     assert kept["content"] == "可见"
+
+
+def test_fill_empty_content_normalizes_reasoning_alias():
+    filled = fill_empty_content({"role": "assistant", "content": "", "reasoning": "思考"})
+    assert filled["content"] == "思考"
+    assert filled["reasoning_content"] == "思考"
+
+
+@pytest.mark.parametrize(
+    ("controls", "expected"),
+    [
+        ({"reasoning": {"effort": "xhigh"}}, "xhigh"),
+        ({"thinking": {"type": "enabled"}}, "high"),
+        ({"thinking": {"type": "disabled"}}, "none"),
+    ],
+)
+def test_qclaw_build_body_normalizes_agent_reasoning_controls(controls, expected):
+    body, _ = _build_body({"model": "default", "messages": [], **controls})
+
+    assert body["reasoning_effort"] == expected
+    assert "thinking" not in body
+    assert "reasoning" not in body
 
 
 def test_jprx_ctx_matches_official_md5_formula():

@@ -9,7 +9,7 @@ import providers
 import router
 from providers.protocol import UnknownChannel, UnknownModel
 from providers.qwenwork import cosy
-from providers.qwenwork.chat import envelope_error, unwrap_sse_payload
+from providers.qwenwork.chat import build_body, envelope_error, unwrap_sse_payload
 from providers.qwenwork.constants import COSY_VERSION, COSY_VERSION_FROZEN, RSA_PUBLIC_KEY_PEM, STATIC_MODELS
 from providers.qwenwork.store import parse_credentials, qwenwork_auth_dirs
 
@@ -159,3 +159,24 @@ def test_unwrap_outer_sse_envelope():
 
 def test_static_models_match_official_0_1_8():
     assert STATIC_MODELS == ("qwork-advanced", "qwork-auto", "qwork-lite", "qmodel_latest")
+
+
+@pytest.mark.parametrize(
+    ("controls", "expected"),
+    [
+        ({}, False),
+        ({"reasoning_effort": "high"}, True),
+        ({"thinking": {"type": "enabled"}}, True),
+        ({"reasoning_effort": "none"}, False),
+        ({"enable_thinking": False}, False),
+    ],
+)
+def test_qwenwork_build_body_applies_reasoning_switch(controls, expected):
+    body, _, _ = build_body({
+        "model": "qwork-advanced",
+        "messages": [{"role": "user", "content": "hello"}],
+        **controls,
+    })
+
+    assert body["chat_context"]["extra"]["modelConfig"]["is_reasoning"] is expected
+    assert body["model_config"]["is_reasoning"] is expected

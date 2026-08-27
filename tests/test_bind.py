@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +18,10 @@ class _QwenStub:
     id = "qwenwork"
     display_name = "QwenWork"
     checkin_supported = False
+
+    def __init__(self):
+        self.last_payload = None
+        self.last_api_key_info = None
 
     def list_models(self):
         return [{"id": "auto"}, {"id": "qwork-advanced"}]
@@ -40,7 +45,22 @@ class _QwenStub:
         return False
 
     async def chat_completions(self, payload, api_key_info):
-        return ("json", {"model": payload.get("model"), "id": "stub"})
+        self.last_payload = payload
+        self.last_api_key_info = api_key_info
+        return (
+            "json",
+            {
+                "id": "chatcmpl-stub",
+                "object": "chat.completion",
+                "model": payload.get("model"),
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
 
 
 @pytest.fixture()
@@ -136,3 +156,104 @@ def test_ensure_usable_503_does_not_need_workbuddy(qwen_enabled):
         asyncio.run(router.ensure_usable("qwenwork"))
     assert err.value.status_code == 503
     assert err.value.detail["error"]["code"] == "channel_unavailable"
+
+
+def test_responses_after_bind_dispatches_to_selected_provider(qwen_enabled, monkeypatch):
+    async def fail_workbuddy(*_args, **_kwargs):
+        raise AssertionError("Responses bypassed the selected provider")
+
+    monkeypatch.setattr("proxy.proxy_chat_completions", fail_workbuddy)
+    bound = router.bind(
+        {"model": "qwenwork/qwork-advanced"},
+        {"default_channel": "qwenwork"},
+    )
+
+    result = asyncio.run(router.responses_after_bind(
+        bound,
+        {
+            "model": "qwenwork/qwork-advanced",
+            "input": "hello",
+            "reasoning": {"effort": "low"},
+        },
+        {"id": 7, "name": "qwen-key", "default_channel": "qwenwork"},
+    ))
+
+    assert result[0] == "json"
+    assert result[1]["model"] == "qwenwork/qwork-advanced"
+    assert result[1]["output"][0]["content"][0]["text"] == "ok"
+    assert qwen_enabled.last_payload["model"] == "qwork-advanced"
+    assert qwen_enabled.last_payload["reasoning_effort"] == "low"
+    assert qwen_enabled.last_api_key_info["_bind_channel"] == "qwenwork"
+
+
+def test_responses_after_bind_rewrites_nested_stream_model(qwen_enabled, monkeypatch):
+    async def stream_response(payload, api_key_info):
+        qwen_enabled.last_payload = payload
+        qwen_enabled.last_api_key_info = api_key_info
+
+        async def chunks():
+            yield (
+                'data: {"id":"chatcmpl-stub","model":"qwork-advanced",'
+                '"choices":[{"index":0,"delta":{"content":"ok"},'
+                '"finish_reason":null}]}\n\n'
+            ).encode()
+            yield (
+                'data: {"id":"chatcmpl-stub","model":"qwork-advanced",'
+                '"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+            ).encode()
+            yield b"data: [DONE]\n\n"
+
+        return ("stream", chunks())
+
+    monkeypatch.setattr(qwen_enabled, "chat_completions", stream_response)
+    original = "qwenwork/qwork-advanced"
+    bound = router.bind(
+        {"model": original},
+        {"default_channel": "qwenwork"},
+    )
+
+    async def collect_events():
+        result = await router.responses_after_bind(
+            bound,
+            {"model": original, "input": "hello", "stream": True},
+            {"id": 7, "name": "qwen-key", "default_channel": "qwenwork"},
+        )
+        assert result[0] == "stream"
+        return [chunk async for chunk in result[1]]
+
+    chunks = asyncio.run(collect_events())
+    events = [
+        json.loads(line[6:])
+        for chunk in chunks
+        for line in (
+            chunk.decode() if isinstance(chunk, (bytes, bytearray)) else chunk
+        ).splitlines()
+        if line.startswith("data: {")
+    ]
+    snapshots = [event["response"] for event in events if "response" in event]
+
+    assert snapshots
+    assert all(snapshot["model"] == original for snapshot in snapshots)
+    assert all(event.get("model", original) == original for event in events)
+
+
+def test_responses_after_bind_preserves_provider_error(qwen_enabled, monkeypatch):
+    expected = (429, {"error": {"message": "busy", "type": "rate_limit_error"}})
+
+    async def fail_response(_payload, _api_key_info):
+        return ("error", expected)
+
+    monkeypatch.setattr(qwen_enabled, "chat_completions", fail_response)
+    original = "qwenwork/qwork-advanced"
+    bound = router.bind(
+        {"model": original},
+        {"default_channel": "qwenwork"},
+    )
+
+    result = asyncio.run(router.responses_after_bind(
+        bound,
+        {"model": original, "input": "hello"},
+        {"id": 7, "name": "qwen-key", "default_channel": "qwenwork"},
+    ))
+
+    assert result == ("error", expected)

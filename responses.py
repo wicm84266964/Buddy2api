@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional
 
 import proxy
+from reasoning_controls import normalize_chat_reasoning
 
 
 _DEBUG_SECRET_KEYS = {
@@ -22,6 +23,26 @@ _DEBUG_SECRET_KEYS = {
     "api_key", "authorization", "session_state", "sessionstate",
 }
 _DEBUG_CONTENT_KEYS = {"content", "input", "instructions", "output"}
+_RESPONSE_ERROR_CODES = frozenset({
+    "server_error",
+    "rate_limit_exceeded",
+    "invalid_prompt",
+    "vector_store_timeout",
+    "invalid_image",
+    "invalid_image_format",
+    "invalid_base64_image",
+    "invalid_image_url",
+    "image_too_large",
+    "image_too_small",
+    "image_parse_error",
+    "image_content_policy_violation",
+    "invalid_image_mode",
+    "image_file_too_large",
+    "unsupported_image_media_type",
+    "empty_image_file",
+    "failed_to_download_image",
+    "image_file_not_found",
+})
 
 
 def _redact_debug_value(value, *, include_content: bool = False):
@@ -118,7 +139,8 @@ def responses_to_chat(resp_payload: dict) -> dict:
     将 Responses API 请求转换为 Chat Completions 请求。
     
     Responses 请求结构:
-      model, input[], instructions, tools[], stream, temperature, max_output_tokens
+      model, input[], instructions, tools[], stream, temperature,
+      max_output_tokens, reasoning.effort
     
     Chat 请求结构:
       model, messages[], tools[], stream, temperature, max_tokens
@@ -229,6 +251,20 @@ def responses_to_chat(resp_payload: dict) -> dict:
         chat_payload["max_tokens"] = resp_payload["max_output_tokens"]
     if resp_payload.get("top_p") is not None:
         chat_payload["top_p"] = resp_payload["top_p"]
+
+    # Responses prefers reasoning.effort. Compatibility forms used by
+    # OpenCode, DSH, Cherry Studio, and Claude-style clients are normalized
+    # to the Chat reasoning_effort field here.
+    normalized_reasoning = normalize_chat_reasoning(resp_payload, prefer_nested=True)
+    for key in (
+        "reasoning_effort",
+        "reasoning_summary",
+        "reasoning",
+        "thinking",
+        "output_config",
+    ):
+        if key in normalized_reasoning:
+            chat_payload[key] = normalized_reasoning[key]
 
     return chat_payload
 
@@ -469,24 +505,63 @@ def _sanitize_tool_description(desc: str) -> str:
 # Chat → Responses 响应映射（非流式）
 # ============================================================
 
-def chat_response_to_responses(chat_resp: dict, model: str) -> dict:
+def _responses_usage(usage: dict) -> dict:
+    input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+    output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
+    input_details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    output_details = usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
+    return {
+        "input_tokens": input_tokens,
+        "input_tokens_details": {
+            "cached_tokens": input_details.get("cached_tokens", 0),
+        },
+        "output_tokens": output_tokens,
+        "output_tokens_details": {
+            "reasoning_tokens": output_details.get("reasoning_tokens", 0),
+        },
+        "total_tokens": usage.get("total_tokens", input_tokens + output_tokens),
+    }
+
+
+def _response_error(error: Optional[dict]) -> Optional[dict]:
+    if not error:
+        return None
+    code = str(error.get("code") or "server_error")
+    return {
+        "code": code if code in _RESPONSE_ERROR_CODES else "server_error",
+        "message": str(error.get("message") or "The upstream response failed."),
+    }
+
+
+def _response_request_fields(resp_payload: Optional[dict]) -> dict:
+    payload = resp_payload if isinstance(resp_payload, dict) else {}
+    parallel_tool_calls = payload.get("parallel_tool_calls")
+    if not isinstance(parallel_tool_calls, bool):
+        parallel_tool_calls = True
+    tools = payload.get("tools")
+    if not isinstance(tools, list):
+        tools = []
+    tool_choice = payload.get("tool_choice")
+    if tool_choice is None:
+        tool_choice = "auto"
+    return {
+        "parallel_tool_calls": parallel_tool_calls,
+        "tool_choice": tool_choice,
+        "tools": tools,
+    }
+
+
+def chat_response_to_responses(
+    chat_resp: dict,
+    model: str,
+    resp_payload: Optional[dict] = None,
+) -> dict:
     """将 Chat Completions 非流式响应转换为 Responses API 响应。"""
     resp_id = "resp_" + chat_resp.get("id", os.urandom(12).hex())
     output = []
 
     for choice in chat_resp.get("choices") or []:
         msg = choice.get("message") or {}
-        
-        # 文本内容
-        content = msg.get("content")
-        if content:
-            output.append({
-                "type": "message",
-                "id": _gen_item_id("msg"),
-                "role": "assistant",
-                "status": "completed",
-                "content": [{"type": "output_text", "text": content}],
-            })
 
         # reasoning 内容
         reasoning = msg.get("reasoning_content")
@@ -494,7 +569,24 @@ def chat_response_to_responses(chat_resp: dict, model: str) -> dict:
             output.append({
                 "type": "reasoning",
                 "id": _gen_item_id("rsn"),
+                "status": "completed",
                 "summary": [{"type": "summary_text", "text": reasoning}],
+            })
+
+        # 文本内容。部分兼容上游会把 reasoning_content 复制进空 content，
+        # 相同文本只作为 reasoning 输出，避免客户端重复显示。
+        content = msg.get("content")
+        if content and content != reasoning:
+            output.append({
+                "type": "message",
+                "id": _gen_item_id("msg"),
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": content,
+                    "annotations": [],
+                }],
             })
 
         # tool_calls
@@ -538,13 +630,10 @@ def chat_response_to_responses(chat_resp: dict, model: str) -> dict:
         "status": status,
         "model": chat_resp.get("model") or model,
         "output": output,
-        "error": error,
+        "error": _response_error(error),
         "incomplete_details": incomplete_details,
-        "usage": {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-            "total_tokens": usage.get("total_tokens", 0),
-        },
+        **_response_request_fields(resp_payload),
+        "usage": _responses_usage(usage),
     }
 
 
@@ -634,6 +723,7 @@ async def _iter_chat_sse_data(
 async def chat_stream_to_responses_stream(
     chat_stream: AsyncGenerator[bytes, None],
     model: str,
+    resp_payload: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     """Convert a Chat Completions SSE stream into Responses API events."""
     resp_id = "resp_" + os.urandom(12).hex()
@@ -642,6 +732,7 @@ async def chat_stream_to_responses_stream(
     seq = -1
     output_items: list[dict] = []
     item_states: list[dict] = []
+    reasoning_states: dict[int, dict] = {}
     text_states: dict[int, dict] = {}
     tool_states: dict[tuple[int, int], dict] = {}
     usage: dict = {}
@@ -650,6 +741,7 @@ async def chat_stream_to_responses_stream(
     productive_choices: set[int] = set()
     saw_done = False
     stream_error: Optional[dict] = None
+    request_fields = _response_request_fields(resp_payload)
 
     def event(event_name: str, **data) -> str:
         nonlocal seq
@@ -661,15 +753,7 @@ async def chat_stream_to_responses_stream(
         })
 
     def response_usage() -> dict:
-        input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
-        output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
-        return {
-            "input_tokens": input_tokens,
-            "input_tokens_details": {"cached_tokens": 0},
-            "output_tokens": output_tokens,
-            "output_tokens_details": {"reasoning_tokens": 0},
-            "total_tokens": usage.get("total_tokens", input_tokens + output_tokens),
-        }
+        return _responses_usage(usage)
 
     def response_snapshot(status: str, **extra) -> dict:
         snapshot = {
@@ -682,7 +766,10 @@ async def chat_stream_to_responses_stream(
             "error": None,
             "incomplete_details": None,
             "usage": None if status == "in_progress" else response_usage(),
+            **request_fields,
         }
+        if extra.get("error") is not None:
+            extra["error"] = _response_error(extra["error"])
         snapshot.update(extra)
         return snapshot
 
@@ -693,7 +780,29 @@ async def chat_stream_to_responses_stream(
         output_index = state["output_index"]
         item["status"] = status
         events = []
-        if state["kind"] == "text":
+        if state["kind"] == "reasoning":
+            item["summary"] = [{
+                "type": "summary_text",
+                "text": state["text"],
+            }]
+            events.append(event(
+                "response.reasoning_summary_text.done",
+                item_id=item["id"],
+                output_index=output_index,
+                summary_index=0,
+                text=state["text"],
+            ))
+            events.append(event(
+                "response.reasoning_summary_part.done",
+                item_id=item["id"],
+                output_index=output_index,
+                summary_index=0,
+                part={
+                    "type": "summary_text",
+                    "text": state["text"],
+                },
+            ))
+        elif state["kind"] == "text":
             events.append(event(
                 "response.output_text.done",
                 item_id=item["id"],
@@ -783,13 +892,88 @@ async def chat_stream_to_responses_stream(
                 if finish_reason:
                     finished_choices[choice_index] = str(finish_reason)
 
+                reasoning_delta = delta.get("reasoning_content", "")
+                if reasoning_delta:
+                    has_open_tool = any(
+                        current_choice == choice_index and not state.get("closed")
+                        for (current_choice, _), state in tool_states.items()
+                    )
+                    if choice_index in text_states or has_open_tool:
+                        stream_error = {
+                            "code": "invalid_upstream_event",
+                            "message": (
+                                "The upstream emitted reasoning after answer or tool output "
+                                "had already started."
+                            ),
+                        }
+                        break
+                    if not isinstance(reasoning_delta, str):
+                        reasoning_delta = str(reasoning_delta)
+                    productive_choices.add(choice_index)
+                    state = reasoning_states.get(choice_index)
+                    if state is None:
+                        text_state = text_states.pop(choice_index, None)
+                        if text_state:
+                            for pending_event in close_item(text_state, "completed"):
+                                yield pending_event
+                        item = {
+                            "type": "reasoning",
+                            "id": _gen_item_id("rsn"),
+                            "status": "in_progress",
+                            "summary": [],
+                        }
+                        output_index = len(output_items)
+                        output_items.append(item)
+                        state = {
+                            "kind": "reasoning",
+                            "item": item,
+                            "output_index": output_index,
+                            "text": "",
+                            "closed": False,
+                        }
+                        reasoning_states[choice_index] = state
+                        item_states.append(state)
+                        yield event(
+                            "response.output_item.added",
+                            output_index=output_index,
+                            item=item,
+                        )
+                        yield event(
+                            "response.reasoning_summary_part.added",
+                            item_id=item["id"],
+                            output_index=output_index,
+                            summary_index=0,
+                            part={"type": "summary_text", "text": ""},
+                        )
+                    state["text"] += reasoning_delta
+                    state["item"]["summary"] = [{
+                        "type": "summary_text",
+                        "text": state["text"],
+                    }]
+                    yield event(
+                        "response.reasoning_summary_text.delta",
+                        item_id=state["item"]["id"],
+                        output_index=state["output_index"],
+                        summary_index=0,
+                        delta=reasoning_delta,
+                    )
+
                 text = delta.get("content", "")
+                if reasoning_delta and text == reasoning_delta:
+                    text = ""
+                reasoning_state = reasoning_states.get(choice_index)
+                if text and reasoning_state and text == reasoning_state["text"]:
+                    text = ""
                 if text:
                     if not isinstance(text, str):
                         text = str(text)
                     productive_choices.add(choice_index)
                     state = text_states.get(choice_index)
                     if state is None:
+                        reasoning_state = reasoning_states.pop(choice_index, None)
+                        if reasoning_state:
+                            for pending_event in close_item(reasoning_state, "completed"):
+                                yield pending_event
                         item = {
                             "type": "message",
                             "id": _gen_item_id("msg"),
@@ -854,6 +1038,10 @@ async def chat_stream_to_responses_stream(
                     fn = tc.get("function") or {}
 
                     if state is None:
+                        reasoning_state = reasoning_states.pop(choice_index, None)
+                        if reasoning_state:
+                            for pending_event in close_item(reasoning_state, "completed"):
+                                yield pending_event
                         text_state = text_states.pop(choice_index, None)
                         if text_state:
                             for pending_event in close_item(text_state, "completed"):
@@ -905,6 +1093,8 @@ async def chat_stream_to_responses_stream(
                             output_index=state["output_index"],
                             delta=args,
                         )
+            if stream_error:
+                break
     except (UnicodeDecodeError, TypeError, ValueError) as exc:
         stream_error = {
             "code": "upstream_stream_error",
@@ -1007,6 +1197,8 @@ def _gen_item_id(prefix: str) -> str:
 async def proxy_responses(
     resp_payload: dict,
     api_key_info: Optional[dict] = None,
+    *,
+    chat_handler=None,
 ) -> tuple:
     """
     主代理函数 — Responses API 版本。
@@ -1022,7 +1214,8 @@ async def proxy_responses(
     _maybe_dump("responses_request_chat", chat_payload)
 
     # 2. 调用现有 proxy
-    result = await proxy.proxy_chat_completions(chat_payload, api_key_info)
+    handler = chat_handler or proxy.proxy_chat_completions
+    result = await handler(chat_payload, api_key_info)
     
     if result[0] == "error":
         return result
@@ -1032,11 +1225,11 @@ async def proxy_responses(
     if result[0] == "json":
         # 非流式: 映射响应
         chat_resp = result[1]
-        resp = chat_response_to_responses(chat_resp, model)
+        resp = chat_response_to_responses(chat_resp, model, resp_payload)
         return ("json", resp)
     
     elif result[0] == "stream":
         # 流式: 映射事件
         chat_gen = result[1]
-        resp_gen = chat_stream_to_responses_stream(chat_gen, model)
+        resp_gen = chat_stream_to_responses_stream(chat_gen, model, resp_payload)
         return ("stream", resp_gen)

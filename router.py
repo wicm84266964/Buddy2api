@@ -9,6 +9,8 @@ from typing import Optional
 from fastapi import HTTPException
 
 import providers
+import responses
+from reasoning_controls import normalize_chat_reasoning
 from providers.protocol import (
     BindResult,
     InvalidModel,
@@ -166,9 +168,16 @@ def dispatch_payload(payload: dict, inner: str) -> dict:
 
 def _rewrite_json_model(obj, original: str):
     if isinstance(obj, dict):
+        rewritten = None
         if "model" in obj and isinstance(obj["model"], str):
-            obj = dict(obj)
-            obj["model"] = original
+            rewritten = dict(obj)
+            rewritten["model"] = original
+        if isinstance(obj.get("response"), dict):
+            if rewritten is None:
+                rewritten = dict(obj)
+            rewritten["response"] = _rewrite_json_model(obj["response"], original)
+        if rewritten is not None:
+            obj = rewritten
         return obj
     return obj
 
@@ -216,13 +225,36 @@ async def echo_original(result: tuple, original: str) -> tuple:
 async def chat_after_bind(
     bound: BindResult, payload: dict, api_key_info: dict | None
 ) -> tuple:
+    result = await _chat_after_bind_no_echo(bound, payload, api_key_info)
+    return await echo_original(result, bound.original)
+
+
+async def _chat_after_bind_no_echo(
+    bound: BindResult, payload: dict, api_key_info: dict | None
+) -> tuple:
     provider = providers.get_provider(bound.channel)
     if provider is None:
         raise UnknownChannel(bound.channel)
     inner = provider.translate_model(bound.inner)
-    dispatch = dispatch_payload(payload, inner)
+    dispatch = normalize_chat_reasoning(dispatch_payload(payload, inner))
     info = dict(api_key_info or {})
     info["_log_model"] = bound.original
     info["_bind_channel"] = bound.channel
-    result = await provider.chat_completions(dispatch, info)
+    return await provider.chat_completions(dispatch, info)
+
+
+async def responses_after_bind(
+    bound: BindResult, payload: dict, api_key_info: dict | None
+) -> tuple:
+    """Bridge Responses through the provider selected by the existing bind."""
+    dispatch = dispatch_payload(payload, bound.inner)
+
+    async def chat_handler(chat_payload: dict, _api_key_info: dict | None) -> tuple:
+        return await _chat_after_bind_no_echo(bound, chat_payload, api_key_info)
+
+    result = await responses.proxy_responses(
+        dispatch,
+        api_key_info,
+        chat_handler=chat_handler,
+    )
     return await echo_original(result, bound.original)
