@@ -129,24 +129,41 @@ async def time_sync(account: dict) -> str:
     return str(server_time or "")
 
 
-async def list_remote_models(account: dict) -> list[dict]:
+def parse_model_list(data: dict) -> list[dict]:
+    rows = []
+    if isinstance(data, dict):
+        rows = data.get("model_status_list") or data.get("models") or []
+    elif isinstance(data, list):
+        rows = data
+    models = []
+    seen: set[str] = set()
+    for row in rows:
+        if isinstance(row, str):
+            mid = row.strip()
+            name = mid
+            description = ""
+        elif isinstance(row, dict):
+            mid = str(row.get("id") or row.get("model_id") or "").strip()
+            name = row.get("name") or row.get("display_id") or mid
+            description = row.get("description") or ""
+        else:
+            continue
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        models.append({"id": mid, "name": name, "description": description})
+    return models
+
+
+async def fetch_supplier_models(account: dict) -> list[dict]:
+    """Live cmd 4320 list. Empty means no remote ids; caller decides fallback."""
     data, token = await post_cmd(CMD_MODEL_LIST, account)
     apply_new_token(account, token)
-    rows = data.get("model_status_list") or data.get("models") or []
-    models = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        mid = str(row.get("id") or "").strip()
-        if not mid:
-            continue
-        models.append(
-            {
-                "id": mid,
-                "name": row.get("name") or row.get("display_id") or mid,
-                "description": row.get("description") or "",
-            }
-        )
+    return parse_model_list(data)
+
+
+async def list_remote_models(account: dict) -> list[dict]:
+    models = await fetch_supplier_models(account)
     return models or [{"id": item, "name": item} for item in STATIC_MODELS]
 
 

@@ -22,16 +22,19 @@ class QClawProvider:
     checkin_supported = False
 
     def list_models(self) -> list[dict]:
-        return [{"id": item} for item in STATIC_MODELS]
+        import catalog
+
+        return catalog.models_for(self.id, [{"id": item} for item in STATIC_MODELS])
 
     def alias_map(self) -> dict[str, str]:
         return dict(ALIASES)
 
     def accepts_model(self, inner: str) -> bool:
         value = (inner or "").strip()
-        if value in STATIC_MODELS or value in ALIASES:
+        if value in ALIASES or value.startswith("pool-"):
             return True
-        return value.startswith("pool-")
+        ids = {str(item.get("id")) for item in self.list_models() if isinstance(item, dict)}
+        return value in ids
 
     def translate_model(self, model: str) -> str:
         return chat.translate_model(model)

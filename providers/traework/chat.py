@@ -30,8 +30,14 @@ def translate_model(model: str) -> str:
 
 
 def accepts_model(inner: str) -> bool:
+    import catalog
+
     value = (inner or "").strip()
-    return value in STATIC_MODELS or value in ALIASES
+    if value in ALIASES:
+        return True
+    models = catalog.models_for(CHANNEL_ID, [{"id": item} for item in STATIC_MODELS])
+    ids = {str(item.get("id")) for item in models if isinstance(item, dict)}
+    return value in ids
 
 
 def _last_user_text(payload: dict) -> str:
