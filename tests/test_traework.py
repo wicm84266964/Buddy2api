@@ -73,6 +73,42 @@ def test_bind_traework_when_enabled(traework_enabled):
         router.bind({"model": "glm-5.2"}, {"default_channel": "traework"})
 
 
+def test_parse_supplier_models_official_grouped_list():
+    from providers.traework.models import parse_supplier_models
+
+    parsed = parse_supplier_models(
+        {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "list": [
+                    {
+                        "function": "solo_coder",
+                        "models": [
+                            {
+                                "name": "Doubao-Seed-2.0-Code",
+                                "display_name": "Doubao-Seed-2.0-Code",
+                                "is_default": False,
+                            },
+                            {
+                                "name": "Doubao-Seed-Code",
+                                "display_name": "Doubao-Seed-Code",
+                            },
+                            {
+                                "name": "qwen-3.6-plus",
+                                "display_name": "qwen-3.6-plus",
+                            },
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+    ids = [item["id"] for item in parsed]
+    assert ids == ["Doubao-Seed-2.0-Code", "Doubao-Seed-Code", "qwen-3.6-plus"]
+    assert "function" not in ids
+
+
 def test_translate_auto():
     assert translate_model("auto") == "qwen-3.7-plus"
 

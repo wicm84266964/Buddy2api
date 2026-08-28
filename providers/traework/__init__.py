@@ -18,7 +18,9 @@ class TraeWorkProvider:
     checkin_supported = True
 
     def list_models(self) -> list[dict]:
-        return [{"id": item} for item in STATIC_MODELS]
+        import catalog
+
+        return catalog.models_for(self.id, [{"id": item} for item in STATIC_MODELS])
 
     def alias_map(self) -> dict[str, str]:
         return dict(ALIASES)

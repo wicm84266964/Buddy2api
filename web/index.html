@@ -388,7 +388,7 @@ createApp({
   template:`
   <div class="layout">
     <header class="topbar">
-      <div class="brand-block"><div class="brand-symbol">B2</div><div class="brand-copy"><div class="brand-title">Buddy 2 API</div><div class="brand-meta">Local model gateway · v2.1.1</div></div></div>
+      <div class="brand-block"><div class="brand-symbol">B2</div><div class="brand-copy"><div class="brand-title">Buddy 2 API</div><div class="brand-meta">Local model gateway · v2.1.2</div></div></div>
       <nav class="topnav"><div v-for="n in nav" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="go(n.k)" v-html="n.i+'<span>'+n.l+'</span>'"></div></nav>
       <div class="top-actions">
         <button class="refresh-cta" @click="hardRefresh"><span v-html="I.refresh"></span><span>刷新</span></button>
@@ -813,11 +813,12 @@ createApp({
   </div><div class="modal-f"><button class="btn" @click="close">{{res?'关闭':'取消'}}</button><button class="btn pri" @click="create" v-if="!res" :disabled="saving">{{saving?'创建中':'创建'}}</button></div></div></div>
 </div>`
 }).component('mdls',{props:['token','toast'],setup(p){
-  const m=ref([]),al=ref({}),ld=ref(true);
+  const m=ref([]),al=ref({}),ld=ref(true),sources=ref([]),syncing=ref(false);
   const BUILTIN=['gpt-4o','gpt-4o-mini','gpt-4-turbo','gpt-4','gpt-3.5-turbo','claude-3.5-sonnet','claude-3-haiku','deepseek-chat','deepseek-coder','moonshot-v1-128k','moonshot-v1-32k'];
   const newKey=ref(''),newVal=ref('');
-  async function load(){ld.value=true;try{m.value=await api.get('/admin/models',p.token);al.value=await api.get('/admin/aliases',p.token)}catch(e){p.toast('失败','err')}ld.value=false}
+  async function load(){ld.value=true;try{m.value=await api.get('/admin/models',p.token);al.value=await api.get('/admin/aliases',p.token);try{const snap=await api.get('/admin/models/catalogs',p.token);sources.value=snap.sources||[]}catch(e){sources.value=[]}}catch(e){p.toast('失败','err')}ld.value=false}
   async function save(){try{await api.put('/admin/models',m.value,p.token);await api.put('/admin/aliases',al.value,p.token);p.toast('已保存')}catch(e){p.toast('失败','err')}}
+  async function syncSources(){if(syncing.value)return;syncing.value=true;try{const r=await api.post('/admin/models/refresh',{},p.token);sources.value=r.sources||[];p.toast('已读取各通道供应模型');try{m.value=await api.get('/admin/models',p.token)}catch(e){}}catch(e){p.toast(apiErr(e,'读取供应模型失败'),'err')}syncing.value=false}
   function add(){m.value.push({id:'',name:''})}function rm(i){m.value.splice(i,1)}
   function isBuiltin(k){return BUILTIN.includes(k)}
   function addAlias(){
@@ -828,14 +829,28 @@ createApp({
     al.value={...al.value,[k]:v};newKey.value='';newVal.value='';p.toast('已添加')
   }
   function rmAlias(k){const o={...al.value};delete o[k];al.value=o}
-  onMounted(load);return{m,al,ld,load,save,add,rm,newKey,newVal,addAlias,rmAlias,isBuiltin,I}
+  function modeText(s){return s.mode==='live'?'在线读取':(s.mode==='fallback'?'回退本地':'未读取')}
+  function modeClass(s){return s.mode==='live'?'ok':(s.mode==='fallback'?'warn':'')}
+  const otherSources=computed(()=>sources.value.filter(s=>s.channel!=='workbuddy'));
+  onMounted(load);return{m,al,ld,sources,otherSources,syncing,load,save,syncSources,add,rm,newKey,newVal,addAlias,rmAlias,isBuiltin,modeText,modeClass,I}
 },template:`
 <div>
-  <div class="phead"><h1>模型配置</h1><p>/v1/models 列表 &amp; 别名映射</p></div>
-  <div class="tbar"><button class="btn s pri" @click="save">保存全部</button><button class="btn s" @click="add"><span v-html="I.plus"></span>添加模型</button><button class="btn s" @click="load"><span v-html="I.refresh"></span>刷新</button></div>
+  <div class="phead"><h1>模型配置</h1><p>/v1/models 按通道列出；一键读取各来源供应模型，独有模型（如 TraeWork 豆包）只挂在该通道</p></div>
+  <div class="tbar"><button class="btn s pri" @click="syncSources" :disabled="syncing"><span v-html="I.scan"></span>{{syncing?'读取中':'一键读取供应模型'}}</button><button class="btn s pri" @click="save">保存全部</button><button class="btn s" @click="add"><span v-html="I.plus"></span>添加模型</button><button class="btn s" @click="load" :disabled="ld"><span v-html="I.refresh"></span>刷新</button></div>
+  <div class="card" v-if="sources.length" style="margin-bottom:12px"><div class="card-h">各通道供应模型<span class="sub">在线读取或回退本地/后台列表，互不合并</span></div>
+    <table><thead><tr><th>通道</th><th>方式</th><th>数量</th><th>说明</th></tr></thead><tbody>
+    <tr v-for="s in sources" :key="s.channel"><td>{{s.display_name||s.channel}} <span class="tag">{{s.channel}}</span></td><td><span class="badge" :class="modeClass(s)">{{modeText(s)}}</span></td><td>{{s.count||0}}</td><td class="mono" style="color:var(--fg3)">{{s.message||'—'}}</td></tr>
+    </tbody></table>
+  </div>
+  <div class="card" v-for="s in otherSources" :key="'cat-'+s.channel" style="margin-bottom:12px"><div class="card-h">{{s.display_name||s.channel}}<span class="sub">仅 {{s.channel}}/id ，客户端选错通道会直接拒绝</span></div>
+    <table><thead><tr><th>ID</th><th>名称</th></tr></thead><tbody>
+    <tr v-for="x in (s.models||[])" :key="s.channel+'-'+x.id"><td class="mono">{{s.channel}}/{{x.id}}</td><td>{{x.name||x.id}}</td></tr>
+    <tr v-if="!(s.models&&s.models.length)"><td colspan="2" class="empty">暂无</td></tr>
+    </tbody></table>
+  </div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
   <template v-else>
-  <div class="card"><div class="card-h">模型列表<span class="sub">/v1/models</span></div>
+  <div class="card"><div class="card-h">WorkBuddy 模型列表<span class="sub">可手动编辑；无官方 /models 接口时一键操作为回退</span></div>
     <table><thead><tr><th>ID</th><th>名称</th><th></th></tr></thead><tbody>
     <tr v-for="(x,i) in m" :key="i"><td><input v-model="x.id" style="width:100%;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px;font-family:var(--mono)"/></td><td><input v-model="x.name" style="width:100%;padding:5px 8px;border:1px solid #e8e8e8;border-radius:4px;font:inherit;font-size:12px"/></td><td><button class="btn s danger" @click="rm(i)">删除</button></td></tr>
     <tr v-if="!m.length"><td colspan="3" class="empty">暂无模型</td></tr>

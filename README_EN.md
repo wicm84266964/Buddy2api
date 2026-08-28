@@ -4,7 +4,7 @@
 
 > Local consumer AI clients → one OpenAI-compatible API for Codex, OpenCode, Cherry Studio, NextChat, and similar agents. Work Buddy / CodeBuddy, QClaw, QwenWork, and TraeWork are on by default; pick one in the UI dropdown. Each request stays on one channel.
 
-Release **2.1.1**. Local use only. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+Release **2.1.2**. Local use only. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
 
 ## What is this?
 
@@ -78,7 +78,7 @@ The database migrates on startup. Existing keys stay on `workbuddy`. Startup no 
 | API Key | Created in the UI, bound to one channel |
 | Model | WorkBuddy `auto`; QClaw `auto`; QwenWork `qwork-advanced` |
 
-Unprefixed `auto` follows the key’s channel. Use a separate key per channel.
+Unprefixed `auto` follows the key’s channel. Use a separate key per channel. On the Models page, “一键读取供应模型” refreshes each channel’s supplier list separately; a TraeWork-only id such as Doubao is never merged into WorkBuddy.
 
 ### Reasoning effort
 

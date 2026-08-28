@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 import database as db
 import auth_manager
+import catalog
 import proxy
 import responses
 import providers
@@ -285,14 +286,8 @@ async def health():
     }
 
 
-@app.get("/v1/models")
-async def list_models(
-    authorization: str | None = Header(default=None),
-    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
-):
-    await run_in_threadpool(
-        lambda: _check_client_auth(authorization, x_api_key, consume_quota=False)
-    )
+def collect_v1_models() -> list[dict]:
+    """Aggregate per-channel catalogs for GET /v1/models. WorkBuddy is bare + namespaced."""
     data = []
     workbuddy = providers.get_provider("workbuddy")
     wb_models = workbuddy.list_models() if workbuddy else db.get_setting("models", proxy.DEFAULT_MODELS)
@@ -327,7 +322,18 @@ async def list_models(
                 "owned_by": "buddy2api",
                 "channel": channel,
             })
-    return {"object": "list", "data": data}
+    return data
+
+
+@app.get("/v1/models")
+async def list_models(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-Api-Key"),
+):
+    await run_in_threadpool(
+        lambda: _check_client_auth(authorization, x_api_key, consume_quota=False)
+    )
+    return {"object": "list", "data": collect_v1_models()}
 
 
 @app.post("/v1/chat/completions")
@@ -988,6 +994,18 @@ async def admin_update_settings(
 async def admin_get_models(authorization: str | None = Header(default=None)):
     _check_admin(authorization)
     return db.get_setting("models", proxy.DEFAULT_MODELS)
+
+
+@app.get("/admin/models/catalogs")
+async def admin_get_model_catalogs(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return catalog.catalog_snapshot()
+
+
+@app.post("/admin/models/refresh")
+async def admin_refresh_models(authorization: str | None = Header(default=None)):
+    _check_admin(authorization)
+    return await catalog.refresh_supplier_catalogs()
 
 
 @app.put("/admin/models")
