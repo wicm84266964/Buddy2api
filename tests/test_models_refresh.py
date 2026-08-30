@@ -153,6 +153,19 @@ def test_admin_models_page_has_one_click_control():
     assert "一键读取供应模型" in html
     assert "/admin/models/refresh" in html
     assert "syncSources" in html
+    assert "请选择通道" in html
+    assert "addForm.channel" in html
+    assert "/admin/models/catalogs" in html
+    assert "submitAdd" in html
+
+
+def test_account_test_ui_lets_user_pick_model():
+    html = (Path(__file__).resolve().parents[1] / "web" / "index.html").read_text(encoding="utf-8")
+    assert "openTest" in html
+    assert "runTest" in html
+    assert "test.model" in html
+    assert "开始测试" in html
+    assert "{model:'auto',prompt:'ping'}" not in html
 
 
 def test_supplier_catalog_refresh_keeps_channels_distinct(isolated_db, all_channels, monkeypatch):
@@ -267,3 +280,75 @@ def test_supplier_catalog_refresh_keeps_channels_distinct(isolated_db, all_chann
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+def test_manual_add_goes_to_selected_channel(isolated_db, all_channels):
+    import catalog
+
+    custom_qw = "qwork-user-added"
+    custom_wb = "wb-user-added"
+    custom_qc = "qclaw-user-added"
+
+    qwenwork = providers.get_provider("qwenwork")
+    workbuddy = providers.get_provider("workbuddy")
+    qclaw = providers.get_provider("qclaw")
+
+    catalog.upsert_model("qwenwork", custom_qw, "Qwen extra")
+    catalog.upsert_model("workbuddy", custom_wb, "WB extra")
+    catalog.upsert_model("qclaw", "qclaw/" + custom_qc, "QC extra")
+
+    assert qwenwork.accepts_model(custom_qw)
+    assert not workbuddy.accepts_model(custom_qw)
+    assert not qclaw.accepts_model(custom_qw)
+    assert workbuddy.accepts_model(custom_wb)
+    assert not qwenwork.accepts_model(custom_wb)
+    assert qclaw.accepts_model(custom_qc)
+    assert not workbuddy.accepts_model(custom_qc)
+
+    by_id = {item["id"]: item for item in server.collect_v1_models()}
+    assert by_id["qwenwork/" + custom_qw]["channel"] == "qwenwork"
+    assert custom_qw not in by_id
+    assert custom_wb in by_id
+    assert by_id[custom_wb]["channel"] == "workbuddy"
+    assert by_id["qclaw/" + custom_qc]["channel"] == "qclaw"
+    assert custom_qc not in by_id
+
+    snap = {item["channel"]: item for item in catalog.catalog_snapshot()["sources"]}
+    qw_manual = [item for item in snap["qwenwork"]["models"] if item.get("id") == custom_qw]
+    assert qw_manual and qw_manual[0].get("manual") is True
+
+    catalog.remove_model("qwenwork", custom_qw)
+    assert not qwenwork.accepts_model(custom_qw)
+
+
+def test_manual_extra_survives_live_refresh(isolated_db, all_channels, monkeypatch):
+    import catalog
+
+    extra = "qclaw-hand-added"
+    catalog.upsert_model("qclaw", extra, "Hand added")
+    assert extra not in _ids(QCLAW_STATIC)
+    assert providers.get_provider("qclaw").accepts_model(extra)
+
+    _seed_live_accounts()
+    _install_supplier_http(monkeypatch)
+    monkeypatch.setattr(server, "ALLOW_NO_ADMIN_AUTH", True)
+    result = asyncio.run(server.admin_refresh_models())
+    sources = _by_channel(result)
+
+    assert sources["qclaw"]["mode"] == "live"
+    assert extra in _ids(sources["qclaw"]["models"])
+    assert QCLAW_NEW_ID in _ids(sources["qclaw"]["models"])
+    assert providers.get_provider("qclaw").accepts_model(extra)
+    assert providers.get_provider("qclaw").accepts_model(QCLAW_NEW_ID)
+    assert extra not in _ids(providers.get_provider("workbuddy").list_models())
+
+
+def test_manual_add_rejects_unknown_channel(isolated_db, all_channels):
+    import catalog
+
+    with pytest.raises(catalog.CatalogError):
+        catalog.upsert_model("not-a-channel", "foo")
+    with pytest.raises(catalog.CatalogError):
+        catalog.upsert_model("qwenwork", "")
+    with pytest.raises(catalog.CatalogError):
+        catalog.upsert_model("qwenwork", "qwork-advanced")

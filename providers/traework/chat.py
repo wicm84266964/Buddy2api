@@ -375,9 +375,11 @@ async def test_chat(account: dict, model: str = "qwen-3.7-plus", prompt: str = "
             "duration_ms": int((time.time() - t0) * 1000),
             "message": str(exc)[:400],
         }
+    chosen = translate_model(model or "auto")
     return {
         "ok": True,
         "status_code": 200,
         "duration_ms": int((time.time() - t0) * 1000),
+        "model": chosen,
         "message": text[:400],
     }

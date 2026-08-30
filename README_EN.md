@@ -4,7 +4,7 @@
 
 > Local consumer AI clients → one OpenAI-compatible API for Codex, OpenCode, Cherry Studio, NextChat, and similar agents. Work Buddy / CodeBuddy, QClaw, QwenWork, and TraeWork are on by default; pick one in the UI dropdown. Each request stays on one channel.
 
-Release **2.1.2**. Local use only. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+Release **2.1.3**. Local use only. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
 
 ## What is this?
 

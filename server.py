@@ -1024,6 +1024,35 @@ async def admin_update_models(
     return {"status": "ok"}
 
 
+@app.post("/admin/models/catalogs")
+async def admin_upsert_catalog_model(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    data = await _read_json_object(request)
+    channel = str(data.get("channel") or "").strip()
+    model_id = str(data.get("id") or data.get("model") or "").strip()
+    name = str(data.get("name") or "").strip()
+    try:
+        return catalog.upsert_model(channel, model_id, name)
+    except catalog.CatalogError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/admin/models/catalogs")
+async def admin_remove_catalog_model(
+    channel: str,
+    model_id: str,
+    authorization: str | None = Header(default=None),
+):
+    _check_admin(authorization)
+    try:
+        return catalog.remove_model(channel, model_id)
+    except catalog.CatalogError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 # --- Codex 一键配置 ---
 
 @app.post("/admin/codex/setup")
