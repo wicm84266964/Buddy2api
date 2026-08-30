@@ -15,8 +15,13 @@ import database as db
 
 CATALOG_SETTING = "channel_catalogs"
 REFRESH_SETTING = "channel_catalog_refresh"
+EXTRAS_SETTING = "channel_catalog_extras"
 
 Fetcher = Callable[[dict], Awaitable[list[dict]]]
+
+
+class CatalogError(ValueError):
+    """Invalid channel or model id for a catalog write."""
 
 
 def _load_map(key: str) -> dict:
@@ -72,11 +77,155 @@ def normalize_models(rows: Any) -> list[dict]:
     return models
 
 
+def extras_for(channel: str) -> list[dict]:
+    items = _load_map(EXTRAS_SETTING).get(channel)
+    if isinstance(items, list) and items:
+        return normalize_models(items)
+    return []
+
+
+def save_extras(channel: str, models: list[dict]) -> None:
+    extras = _load_map(EXTRAS_SETTING)
+    extras[channel] = normalize_models(models)
+    db.set_setting(EXTRAS_SETTING, extras)
+
+
+def _merge_models(base: list[dict], extra: list[dict]) -> list[dict]:
+    return normalize_models(list(base) + list(extra))
+
+
 def models_for(channel: str, fallback: list[dict]) -> list[dict]:
     stored = stored_catalog(channel)
-    if stored:
-        return stored
-    return list(fallback)
+    base = stored if stored else list(fallback)
+    return _merge_models(base, extras_for(channel))
+
+
+def _with_manual(channel: str, models: list[dict]) -> list[dict]:
+    extra_ids = {str(item.get("id")) for item in extras_for(channel)}
+    annotated = []
+    for item in models:
+        row = dict(item)
+        row["manual"] = str(row.get("id") or "") in extra_ids
+        annotated.append(row)
+    return annotated
+
+
+def _normalize_model_id(channel: str, model_id: str) -> str:
+    mid = str(model_id or "").strip()
+    prefix = f"{channel}/"
+    if mid.startswith(prefix):
+        mid = mid[len(prefix) :].strip()
+    return mid
+
+
+def _require_enabled_channel(channel: str) -> str:
+    import providers
+
+    value = str(channel or "").strip()
+    if not value or not providers.is_channel_enabled(value):
+        raise CatalogError("unknown or disabled channel")
+    return value
+
+
+def current_models(channel: str) -> list[dict]:
+    import providers
+
+    provider = providers.get_provider(channel)
+    if provider is not None:
+        return list(provider.list_models())
+    if channel == "workbuddy":
+        return workbuddy_fallback_models()
+    return extras_for(channel)
+
+
+def upsert_model(channel: str, model_id: str, name: str = "") -> dict:
+    channel = _require_enabled_channel(channel)
+    mid = _normalize_model_id(channel, model_id)
+    if not mid:
+        raise CatalogError("model id is required")
+    label = str(name or "").strip() or mid
+    current = current_models(channel)
+    extra_ids = {str(item.get("id")) for item in extras_for(channel)}
+    current_ids = {str(item.get("id")) for item in current if isinstance(item, dict)}
+    if mid in current_ids and (channel == "workbuddy" or mid not in extra_ids):
+        if channel == "workbuddy":
+            models = []
+            for item in current:
+                row = dict(item) if isinstance(item, dict) else {"id": str(item), "name": str(item)}
+                if str(row.get("id")) == mid:
+                    row["name"] = label
+                models.append(row)
+            db.set_setting("models", models)
+            return {
+                "channel": channel,
+                "id": mid,
+                "name": label,
+                "count": len(models),
+                "models": models,
+                "updated": True,
+            }
+        raise CatalogError("model already exists in this channel")
+    if channel == "workbuddy":
+        models = [dict(item) if isinstance(item, dict) else {"id": str(item), "name": str(item)} for item in current]
+        models.append({"id": mid, "name": label})
+        db.set_setting("models", models)
+        return {
+            "channel": channel,
+            "id": mid,
+            "name": label,
+            "count": len(models),
+            "models": models,
+            "updated": False,
+        }
+    extras = extras_for(channel)
+    found = False
+    for item in extras:
+        if item.get("id") == mid:
+            item["name"] = label
+            found = True
+            break
+    if not found:
+        extras.append({"id": mid, "name": label})
+    save_extras(channel, extras)
+    models = current_models(channel)
+    return {
+        "channel": channel,
+        "id": mid,
+        "name": label,
+        "count": len(models),
+        "models": _with_manual(channel, models),
+        "updated": found,
+    }
+
+
+def remove_model(channel: str, model_id: str) -> dict:
+    channel = _require_enabled_channel(channel)
+    mid = _normalize_model_id(channel, model_id)
+    if not mid:
+        raise CatalogError("model id is required")
+    if channel == "workbuddy":
+        current = workbuddy_fallback_models()
+        models = [
+            item
+            for item in current
+            if str((item.get("id") if isinstance(item, dict) else item) or "") != mid
+        ]
+        if len(models) == len(current):
+            raise CatalogError("model not found")
+        db.set_setting("models", models)
+        return {"channel": channel, "id": mid, "count": len(models), "models": models}
+    extras = extras_for(channel)
+    kept = [item for item in extras if item.get("id") != mid]
+    if len(kept) == len(extras):
+        raise CatalogError("not a manually added model")
+    save_extras(channel, kept)
+    models = current_models(channel)
+    return {
+        "channel": channel,
+        "id": mid,
+        "count": len(models),
+        "models": _with_manual(channel, models),
+    }
 
 
 def workbuddy_fallback_models() -> list[dict]:
@@ -92,17 +241,14 @@ def workbuddy_fallback_models() -> list[dict]:
 
 
 def _fallback_models(channel: str, provider) -> list[dict]:
-    if channel == "workbuddy":
-        return workbuddy_fallback_models()
     if provider is not None:
-        stored = stored_catalog(channel)
-        if stored:
-            return stored
         try:
             return list(provider.list_models())
         except Exception:
             pass
-    return []
+    if channel == "workbuddy":
+        return workbuddy_fallback_models()
+    return extras_for(channel)
 
 
 def _status_row(
@@ -119,7 +265,7 @@ def _status_row(
         "mode": mode,
         "message": message,
         "count": len(models),
-        "models": models,
+        "models": _with_manual(channel, models),
         "updated_at": int(time.time()),
     }
 
@@ -197,7 +343,7 @@ async def refresh_one(channel: str) -> dict:
     return _status_row(
         channel,
         mode="live",
-        models=fetched,
+        models=_merge_models(fetched, extras_for(channel)),
         message="",
         display_name=display_name,
     )
@@ -245,7 +391,7 @@ def catalog_snapshot() -> dict:
                 "mode": meta.get("mode") or ("fallback" if channel not in LIVE_FETCHERS else "static"),
                 "message": meta.get("message") or "",
                 "count": len(models),
-                "models": models,
+                "models": _with_manual(channel, models),
                 "updated_at": meta.get("updated_at"),
             }
         )
