@@ -332,16 +332,27 @@ async def credit_summary(force: bool = False) -> dict:
             )
             continue
         remaining_values = []
+        used_values = []
+        limit_values = []
         ok_count = 0
         unsupported = False
         message = ""
+        channel_unit = "unknown"
         for account in accounts:
             snapshot = await fetch_quota(account)
-            unit = getattr(snapshot, "unit", None) if not isinstance(snapshot, dict) else snapshot.get("unit")
+            unit = str(
+                (getattr(snapshot, "unit", None) if not isinstance(snapshot, dict) else snapshot.get("unit"))
+                or "unknown"
+            )
             ok = bool(getattr(snapshot, "ok", None) if not isinstance(snapshot, dict) else snapshot.get("ok"))
             snap_unsupported = bool(
                 getattr(snapshot, "unsupported", False) if not isinstance(snapshot, dict) else snapshot.get("unsupported")
             )
+            extra = getattr(snapshot, "extra", None) if not isinstance(snapshot, dict) else snapshot.get("extra")
+            if not isinstance(extra, dict):
+                extra = {}
+            if channel_unit == "unknown" and unit in {"credit", "token"}:
+                channel_unit = unit
             if snap_unsupported:
                 unsupported = True
                 message = (
@@ -350,20 +361,29 @@ async def credit_summary(force: bool = False) -> dict:
             if ok:
                 ok_count += 1
             value = getattr(snapshot, "remaining", None) if not isinstance(snapshot, dict) else snapshot.get("remaining")
-            if unit == "credit" and value is not None and not snap_unsupported:
+            if unit == channel_unit and value is not None and not snap_unsupported:
                 remaining_values.append(float(value))
+            if unit == "token" and not snap_unsupported:
+                if extra.get("used") is not None:
+                    used_values.append(float(extra["used"]))
+                if extra.get("limit") is not None:
+                    limit_values.append(float(extra["limit"]))
         remaining = round(sum(remaining_values), 4) if remaining_values else None
+        if channel_unit == "unknown":
+            channel_unit = "credit" if channel != "qclaw" else "token"
         channels.append(
             {
                 "id": channel,
                 "display_name": getattr(provider, "display_name", channel),
-                "unit": "credit",
+                "unit": channel_unit,
                 "remaining": remaining,
+                "used": round(sum(used_values), 4) if used_values else None,
+                "limit": round(sum(limit_values), 4) if limit_values else None,
                 "ok": True,
                 "accounts": len(accounts),
                 "ok_accounts": ok_count,
-                "unsupported": remaining is None,
-                "message": message or ("no credit balance" if remaining is None else ""),
+                "unsupported": remaining is None and not used_values and not limit_values,
+                "message": message or ("no quota number" if remaining is None else ""),
             }
         )
     now_ts = int(time.time())

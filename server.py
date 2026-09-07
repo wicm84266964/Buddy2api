@@ -769,18 +769,24 @@ async def admin_account_resources(
                 "message": "quota API not available",
             }
         snapshot = await fetch_quota(account)
-        unit = getattr(snapshot, "unit", "credit") or "credit"
+        extra = getattr(snapshot, "extra", None) or {}
+        if not isinstance(extra, dict):
+            extra = {}
+        unit = str(getattr(snapshot, "unit", "") or "unknown")
         remaining = getattr(snapshot, "remaining", None)
-        unsupported = bool(getattr(snapshot, "unsupported", False)) or unit != "credit"
+        unsupported = bool(getattr(snapshot, "unsupported", False))
         credit_remaining = remaining if unit == "credit" and not unsupported else None
         return {
             "ok": bool(getattr(snapshot, "ok", False)),
             "account_id": aid,
-            "unit": "credit",
-            "remaining": credit_remaining,
+            "unit": unit,
+            "remaining": remaining,
+            "used": extra.get("used"),
+            "limit": extra.get("limit"),
             "total_dosage": credit_remaining,
-            "unsupported": unsupported or credit_remaining is None,
-            "message": getattr(snapshot, "message", "") or ("no credit balance" if credit_remaining is None else ""),
+            "available_total": credit_remaining,
+            "unsupported": unsupported,
+            "message": getattr(snapshot, "message", "") or "",
             "packages": [],
         }
     return await auth_manager.fetch_account_resources(account, force=bool(force))

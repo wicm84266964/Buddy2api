@@ -63,7 +63,7 @@ def test_parse_credentials_requires_token():
         parse_credentials({"account": {"username": "x"}})
 
 
-def test_bind_traework_when_enabled(traework_enabled):
+def test_bind_traework_when_enabled(isolated_db, traework_enabled):
     bound = router.bind({"model": "auto"}, {"default_channel": "traework"})
     assert bound.channel == "traework"
     assert bound.inner == "auto"

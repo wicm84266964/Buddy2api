@@ -252,12 +252,16 @@ def discover() -> dict:
         if not exists:
             continue
         count = 0
-        for name in ("auth-v2.dat", "auth.dat"):
-            path = folder / name
-            if not path.is_file():
-                continue
+        v2 = folder / "auth-v2.dat"
+        legacy = folder / "auth.dat"
+        # auth.dat is the old device-token file. Same uid as auth-v2.dat JWT;
+        # importing it last overwrites a working session and causes 401.
+        if v2.is_file():
             count += 1
-            files.append(_file_meta(path, existing))
+            files.append(_file_meta(v2, existing))
+        elif legacy.is_file():
+            count += 1
+            files.append(_file_meta(legacy, existing))
         json_fallback = folder / "auth-v2.dat.json"
         if json_fallback.is_file():
             count += 1

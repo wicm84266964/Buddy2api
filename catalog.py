@@ -1,8 +1,8 @@
 """Per-channel supplier model catalogs.
 
 Fetch+parse of each source's list is separate from persist and from chat I/O.
-WorkBuddy and QwenWork have no supplier-list HTTP; they stay on the existing
-static/admin catalog and are reported as fallback.
+WorkBuddy live list is also written to the legacy `models` setting so chat
+and the admin editor keep using the same catalog.
 """
 
 from __future__ import annotations
@@ -291,9 +291,23 @@ async def _fetch_traework(account: dict) -> list[dict]:
     return await fetch_supplier_models(account)
 
 
+async def _fetch_qwenwork(account: dict) -> list[dict]:
+    from providers.qwenwork.models import fetch_supplier_models
+
+    return await fetch_supplier_models(account)
+
+
+async def _fetch_workbuddy(account: dict) -> list[dict]:
+    from providers.workbuddy.models import fetch_supplier_models
+
+    return await fetch_supplier_models(account)
+
+
 LIVE_FETCHERS: dict[str, Fetcher] = {
     "qclaw": _fetch_qclaw,
     "traework": _fetch_traework,
+    "qwenwork": _fetch_qwenwork,
+    "workbuddy": _fetch_workbuddy,
 }
 
 
@@ -340,6 +354,8 @@ async def refresh_one(channel: str) -> dict:
             display_name=display_name,
         )
     save_catalog(channel, fetched)
+    if channel == "workbuddy":
+        db.set_setting("models", fetched)
     return _status_row(
         channel,
         mode="live",
