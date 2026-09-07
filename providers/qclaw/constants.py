@@ -9,6 +9,7 @@ DISPLAY_NAME = "QClaw"
 JPRX_GATEWAY = "https://jprx.m.qq.com"
 AIZONE_BASE = "https://mmgrcalltoken.3g.qq.com/aizone/v1"
 WX_LOGIN_REDIRECT = "https://security.guanjia.qq.com/login"
+# Official QClaw WeChat Open Platform appid (public OAuth client id, not a secret).
 WX_APP_ID = "wx9d11056dd75b7240"
 WX_QRCONNECT = "https://open.weixin.qq.com/connect/qrconnect"
 
