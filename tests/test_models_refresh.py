@@ -8,7 +8,6 @@ import pytest
 import credential_crypto
 import database as db
 import providers
-import proxy
 import router
 import server
 from providers.protocol import KeyChannelMismatch, UnknownModel
@@ -17,6 +16,8 @@ from providers.qwenwork.constants import STATIC_MODELS as QWEN_STATIC
 from providers.traework.constants import STATIC_MODELS as TRAE_STATIC
 
 QCLAW_NEW_ID = "qclaw-live-only-model"
+QWEN_NEW_ID = "qwen-live-only-model"
+WB_NEW_ID = "wb-live-only-model"
 TRAE_NEW_DOUBAO = "Doubao-Seed-2.2-Pro"
 TRAE_DOUBAO_TURBO = "Doubao-Seed-2.1-Turbo"
 TRAE_DOUBAO_CODE = "Doubao-Seed-2.0-Code"
@@ -34,6 +35,28 @@ QCLAW_HTTP_PAYLOAD = {
                 ]
             },
         }
+    },
+}
+
+QWENWORK_HTTP_PAYLOAD = {
+    "qwork": [
+        {"key": "pro", "display_name": "高级", "enable": True},
+        {"key": QWEN_NEW_ID, "display_name": "Qwen Live Only", "enable": True},
+        {"key": "disabled-model", "display_name": "Hidden", "enable": False},
+    ]
+}
+
+WORKBUDDY_HTTP_PAYLOAD = {
+    "code": 0,
+    "msg": "ok",
+    "data": {
+        "models": [
+            {"id": "auto", "name": "Auto", "tags": ["craft"]},
+            {"id": "glm-5.2", "name": "GLM-5.2", "tags": ["craft"]},
+            {"id": WB_NEW_ID, "name": "WB Live Only", "tags": []},
+            {"id": "hunyuan-image-v3.0", "name": "Hunyuan Image V3", "tags": ["text-to-image"]},
+            {"id": 123, "name": "numeric-id-skipped"},
+        ]
     },
 }
 
@@ -92,6 +115,16 @@ def all_channels(monkeypatch):
 def _seed_live_accounts():
     db.add_account(
         {
+            "name": "wb",
+            "uid": "wb-1",
+            "provider": "workbuddy",
+            "status": "active",
+            "access_token": "tok-wb",
+            "expires_at": 9_999_999_999_999,
+        }
+    )
+    db.add_account(
+        {
             "name": "qc",
             "uid": "qc-1",
             "provider": "qclaw",
@@ -110,6 +143,16 @@ def _seed_live_accounts():
             "access_token": "tok-trae",
             "expires_at": 9_999_999_999_999,
             "extra": {"device_id": "dev-1"},
+        }
+    )
+    db.add_account(
+        {
+            "name": "qw",
+            "uid": "qw-1",
+            "provider": "qwenwork",
+            "status": "active",
+            "access_token": "tok-qwen",
+            "extra": {"login_device_id": "dev-qw", "email": "a@b"},
         }
     )
 
@@ -137,10 +180,16 @@ def _install_supplier_http(monkeypatch):
             requested.append(("GET", str(url)))
             if "/api/remote/v1/models" in str(url):
                 return _FakeResponse(TRAEWORK_HTTP_PAYLOAD)
+            if "/api/v2/model/list" in str(url):
+                return _FakeResponse(QWENWORK_HTTP_PAYLOAD)
+            if "/v2/enterprises/personal/models" in str(url):
+                return _FakeResponse(WORKBUDDY_HTTP_PAYLOAD)
             raise AssertionError(f"unexpected GET {url}")
 
     monkeypatch.setattr("providers.qclaw.jprx.httpx.AsyncClient", FakeAsyncClient)
     monkeypatch.setattr("providers.traework.models.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("providers.qwenwork.models.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("providers.workbuddy.models.httpx.AsyncClient", FakeAsyncClient)
     return requested
 
 
@@ -180,8 +229,10 @@ def test_supplier_catalog_refresh_keeps_channels_distinct(isolated_db, all_chann
 
     assert QCLAW_NEW_ID not in _ids(qclaw.list_models())
     assert TRAE_NEW_DOUBAO not in _ids(traework.list_models())
+    assert WB_NEW_ID not in _ids(workbuddy.list_models())
     assert not qclaw.accepts_model(QCLAW_NEW_ID)
     assert not traework.accepts_model(TRAE_NEW_DOUBAO)
+    assert not workbuddy.accepts_model(WB_NEW_ID)
 
     _seed_live_accounts()
     requested = _install_supplier_http(monkeypatch)
@@ -201,36 +252,48 @@ def test_supplier_catalog_refresh_keeps_channels_distinct(isolated_db, all_chann
 
     assert sources["qclaw"]["mode"] == "live"
     assert sources["traework"]["mode"] == "live"
-    assert sources["workbuddy"]["mode"] == "fallback"
-    assert sources["workbuddy"]["message"] == "no supplier-list API"
-    assert sources["qwenwork"]["mode"] == "fallback"
-    assert sources["qwenwork"]["message"] == "no supplier-list API"
+    assert sources["workbuddy"]["mode"] == "live"
+    assert sources["qwenwork"]["mode"] == "live"
 
     assert QCLAW_NEW_ID in _ids(sources["qclaw"]["models"])
     assert TRAE_NEW_DOUBAO in _ids(sources["traework"]["models"])
     assert TRAE_DOUBAO_TURBO in _ids(sources["traework"]["models"])
 
     wb_ids = _ids(sources["workbuddy"]["models"])
+    assert WB_NEW_ID in wb_ids
+    assert "glm-5.2" in wb_ids
+    assert "auto" in wb_ids
+    assert "hunyuan-image-v3.0" not in wb_ids
     assert QCLAW_NEW_ID not in wb_ids
     assert TRAE_NEW_DOUBAO not in wb_ids
     assert TRAE_DOUBAO_TURBO not in wb_ids
-    assert wb_ids == _ids(proxy.DEFAULT_MODELS)
 
     qwen_ids = _ids(sources["qwenwork"]["models"])
-    assert qwen_ids == set(QWEN_STATIC)
+    assert "pro" in qwen_ids
+    assert QWEN_NEW_ID in qwen_ids
+    assert "disabled-model" not in qwen_ids
     assert TRAE_NEW_DOUBAO not in qwen_ids
     assert QCLAW_NEW_ID not in qwen_ids
 
     assert any("/data/4320/forward" in url for method, url in requested if method == "POST")
     assert any("/api/remote/v1/models" in url for method, url in requested if method == "GET")
-    assert not any("copilot.tencent.com" in url for _, url in requested)
-    assert not any("qwenwork.cn" in url for _, url in requested)
+    assert any("/api/v2/model/list" in url for method, url in requested if method == "GET")
+    assert any("/v2/enterprises/personal/models" in url for method, url in requested if method == "GET")
+    copilot_urls = [url for _, url in requested if "copilot.tencent.com" in url]
+    assert copilot_urls
+    assert all("/v2/enterprises/personal/models" in url for url in copilot_urls)
 
     assert QCLAW_NEW_ID in _ids(qclaw.list_models())
     assert TRAE_NEW_DOUBAO in _ids(traework.list_models())
+    assert QWEN_NEW_ID in _ids(qwenwork.list_models())
+    assert WB_NEW_ID in _ids(workbuddy.list_models())
     assert qclaw.accepts_model(QCLAW_NEW_ID)
     assert traework.accepts_model(TRAE_NEW_DOUBAO)
+    assert qwenwork.accepts_model(QWEN_NEW_ID)
+    assert qwenwork.accepts_model("pro")
     assert traework.accepts_model(TRAE_DOUBAO_TURBO)
+    assert workbuddy.accepts_model(WB_NEW_ID)
+    assert not workbuddy.accepts_model("hunyuan-image-v3.0")
     assert not workbuddy.accepts_model(TRAE_NEW_DOUBAO)
     assert not workbuddy.accepts_model(TRAE_DOUBAO_TURBO)
     assert not qclaw.accepts_model(TRAE_NEW_DOUBAO)
@@ -272,6 +335,10 @@ def test_supplier_catalog_refresh_keeps_channels_distinct(isolated_db, all_chann
     assert "glm-5.2" in by_id
     assert by_id["glm-5.2"]["channel"] == "workbuddy"
     assert by_id["workbuddy/glm-5.2"]["channel"] == "workbuddy"
+    assert WB_NEW_ID in by_id
+    assert by_id[WB_NEW_ID]["channel"] == "workbuddy"
+    assert by_id["workbuddy/" + WB_NEW_ID]["channel"] == "workbuddy"
+    assert "hunyuan-image-v3.0" not in by_id
 
     evidence = os.environ.get("BUDDY2API_EVIDENCE_DIR")
     if evidence:
@@ -280,6 +347,15 @@ def test_supplier_catalog_refresh_keeps_channels_distinct(isolated_db, all_chann
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+
+def test_parse_workbuddy_supplier_models_skips_image_and_non_string_ids():
+    from providers.workbuddy.models import parse_supplier_models
+
+    models = parse_supplier_models(WORKBUDDY_HTTP_PAYLOAD)
+    ids = {item["id"] for item in models}
+    assert ids == {"auto", "glm-5.2", WB_NEW_ID}
+    assert next(item["name"] for item in models if item["id"] == WB_NEW_ID) == "WB Live Only"
 
 
 def test_manual_add_goes_to_selected_channel(isolated_db, all_channels):

@@ -15,6 +15,7 @@ CHAT_PATH = "/algo/api/v2/service/pro/sse/agent_chat_generation"
 CHAT_QUERY = "FetchKeys=llm_model_result&AgentId=agent_common"
 REFRESH_PATH = "/api/v1/deviceToken/refresh"
 ACCOUNT_CONTEXT_PATH = "/api/v1/adapter/user/account-context"
+MODELS_PATH = "/api/v2/model/list"
 
 IDE_VERSION = "0.1.8"
 RELEASE_VERSION = "0.1.8-26081406"
@@ -38,6 +39,9 @@ XcW+ML9FoCI6AOvOzwIDAQAB
 -----END PUBLIC KEY-----"""
 
 STATIC_MODELS = (
+    "pro",
+    "flash",
+    "qwen3.8-max-preview",
     "qwork-advanced",
     "qwork-auto",
     "qwork-lite",
@@ -45,7 +49,8 @@ STATIC_MODELS = (
 )
 
 ALIASES = {
-    "auto": "qwork-advanced",
+    "auto": "pro",
+    "qwork-advanced": "pro",
 }
 
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}

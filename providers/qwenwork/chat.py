@@ -158,7 +158,7 @@ def build_body(payload: dict) -> tuple[dict, str, str]:
             "display_name": model,
             "model": "",
             "format": "openai",
-            "is_vl": model == "qwork-advanced",
+            "is_vl": model in {"pro", "qwork-advanced"},
             "is_reasoning": is_reasoning,
             "api_key": "",
             "url": "",

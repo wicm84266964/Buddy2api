@@ -167,8 +167,28 @@ def test_unwrap_outer_sse_envelope():
     assert unwrap_sse_payload(inner) == [inner]
 
 
-def test_static_models_match_official_0_1_8():
-    assert STATIC_MODELS == ("qwork-advanced", "qwork-auto", "qwork-lite", "qmodel_latest")
+def test_static_models_include_live_and_legacy_ids():
+    assert "pro" in STATIC_MODELS
+    assert "flash" in STATIC_MODELS
+    assert "qwen3.8-max-preview" in STATIC_MODELS
+    assert "qwork-advanced" in STATIC_MODELS
+
+
+def test_parse_qwenwork_supplier_models():
+    from providers.qwenwork.models import parse_supplier_models
+
+    models = parse_supplier_models(
+        {
+            "qwork": [
+                {"key": "pro", "display_name": "高级", "enable": True},
+                {"key": "flash", "display_name": "标准", "enable": True},
+                {"key": "hidden", "display_name": "x", "enable": False},
+            ]
+        }
+    )
+    ids = {item["id"] for item in models}
+    assert ids == {"pro", "flash"}
+    assert next(item["name"] for item in models if item["id"] == "pro") == "高级"
 
 
 @pytest.mark.parametrize(
