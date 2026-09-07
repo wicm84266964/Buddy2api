@@ -91,43 +91,73 @@ class QwenWorkProvider:
         return store.upsert_account(parsed)
 
     async def fetch_quota(self, account: dict) -> QuotaSnapshot:
-        headers = openapi_headers()
-        access = str(account.get("access_token") or "")
-        if access:
-            headers["Authorization"] = f"Bearer {access}"
-        url = f"{GATEWAY}{ACCOUNT_CONTEXT_PATH}?include=user,plan,quota"
+        account_id = int(account.get("id") or 0)
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=headers)
+            if is_token_expired(account):
+                account = await refresh_account(account)
+            response = await _account_context(account)
+            if response.status_code in {401, 403}:
+                first = _http_error_message(response)
+                try:
+                    account = await refresh_account(account)
+                    response = await _account_context(account)
+                except QwenWorkAuthError:
+                    return QuotaSnapshot(
+                        ok=False,
+                        channel=self.id,
+                        account_id=account_id,
+                        unit="credit",
+                        remaining=None,
+                        message=f"{first}；请在官方客户端登录后重新导入",
+                    )
+                if response.status_code >= 400:
+                    return QuotaSnapshot(
+                        ok=False,
+                        channel=self.id,
+                        account_id=account_id,
+                        unit="credit",
+                        remaining=None,
+                        message=f"{first}；请在官方客户端登录后重新导入",
+                    )
+        except QwenWorkAuthError as exc:
+            return QuotaSnapshot(
+                ok=False,
+                channel=self.id,
+                account_id=account_id,
+                unit="credit",
+                remaining=None,
+                message=str(exc)[:240],
+            )
         except httpx.HTTPError as exc:
             return QuotaSnapshot(
                 ok=False,
                 channel=self.id,
-                account_id=int(account.get("id") or 0),
-                unit="unknown",
+                account_id=account_id,
+                unit="credit",
                 remaining=None,
-                unsupported=False,
                 message=str(exc)[:240],
             )
         if response.status_code >= 400:
             return QuotaSnapshot(
                 ok=False,
                 channel=self.id,
-                account_id=int(account.get("id") or 0),
-                unit="unknown",
+                account_id=account_id,
+                unit="credit",
                 remaining=None,
-                message=f"HTTP {response.status_code}",
+                message=_http_error_message(response),
             )
         try:
             data = response.json()
         except ValueError:
             data = {}
+        if isinstance(data, dict) and isinstance(data.get("data"), dict):
+            data = data["data"]
         remaining = _quota_remaining(data)
         return QuotaSnapshot(
             ok=True,
             channel=self.id,
-            account_id=int(account.get("id") or 0),
-            unit="unknown" if remaining is None else "credit",
+            account_id=account_id,
+            unit="credit" if remaining is not None else "unknown",
             remaining=remaining,
             extra={"raw_keys": sorted(data.keys())[:12] if isinstance(data, dict) else []},
             unsupported=remaining is None,
@@ -141,20 +171,79 @@ class QwenWorkProvider:
         return await refresh_account(account)
 
 
+async def _account_context(account: dict):
+    headers = openapi_headers()
+    access = str(account.get("access_token") or "")
+    if access:
+        headers["Authorization"] = f"Bearer {access}"
+    url = f"{GATEWAY}{ACCOUNT_CONTEXT_PATH}?include=user,plan,quota"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        return await client.get(url, headers=headers)
+
+
+def _http_error_message(response) -> str:
+    detail = ""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if isinstance(payload, dict):
+        detail = str(payload.get("errorMessage") or payload.get("errorCode") or payload.get("message") or "")
+    text = f"HTTP {response.status_code}"
+    if detail:
+        text += f" {detail}"
+    return text[:240]
+
+
+_CREDIT_KEYS = (
+    "remaining",
+    "remain",
+    "available",
+    "balance",
+    "credits",
+    "total_dosage",
+    "quota_remain",
+    "left_quota",
+)
+
+
+def _quota_number(value) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if number > 10_000_000_000:
+            return None
+        return number
+    return None
+
+
 def _quota_remaining(data: dict) -> float | None:
     if not isinstance(data, dict):
         return None
-    quota = data.get("quota") if isinstance(data.get("quota"), dict) else data
-    for key in ("remaining", "remain", "available", "balance", "total_dosage"):
-        value = quota.get(key) if isinstance(quota, dict) else None
-        if isinstance(value, (int, float)):
-            return float(value)
-    plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
-    for key in ("remaining", "credits", "balance"):
-        value = plan.get(key)
-        if isinstance(value, (int, float)):
-            return float(value)
-    return None
+    found: list[float] = []
+
+    def walk(obj, depth: int = 0) -> None:
+        if depth > 6:
+            return
+        if isinstance(obj, list):
+            for item in obj[:24]:
+                walk(item, depth + 1)
+            return
+        if not isinstance(obj, dict):
+            return
+        lower = {str(key).lower(): value for key, value in obj.items()}
+        for key in _CREDIT_KEYS:
+            number = _quota_number(lower.get(key))
+            if number is not None:
+                found.append(number)
+                return
+        for value in obj.values():
+            if isinstance(value, (dict, list)):
+                walk(value, depth + 1)
+
+    walk(data)
+    return found[0] if found else None
 
 
 PROVIDER = QwenWorkProvider()

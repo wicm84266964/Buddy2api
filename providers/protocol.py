@@ -83,7 +83,7 @@ class QuotaSnapshot:
     ok: bool
     channel: ChannelId
     account_id: int
-    unit: str
+    unit: str  # "credit" | "token" | "unknown"
     remaining: float | None
     extra: dict = field(default_factory=dict)
     unsupported: bool = False

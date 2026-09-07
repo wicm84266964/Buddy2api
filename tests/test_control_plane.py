@@ -93,7 +93,7 @@ def test_credit_summary_has_null_total(isolated_db):
     assert any(item["id"] == "workbuddy" for item in payload["channels"])
 
 
-def test_credit_summary_qclaw_omits_token_cap(isolated_db, monkeypatch):
+def test_credit_summary_qclaw_uses_token_unit(isolated_db, monkeypatch):
     monkeypatch.setenv("CB_GATEWAY_PROVIDERS", "workbuddy,qclaw")
     db.add_account(
         {
@@ -104,11 +104,31 @@ def test_credit_summary_qclaw_omits_token_cap(isolated_db, monkeypatch):
             "status": "active",
         }
     )
+    from providers.protocol import QuotaSnapshot
+    from providers.qclaw import PROVIDER
+
+    async def fake_quota(account):
+        return QuotaSnapshot(
+            ok=True,
+            channel="qclaw",
+            account_id=int(account.get("id") or 0),
+            unit="token",
+            remaining=40,
+            extra={"used": 10, "limit": 50},
+            unsupported=False,
+        )
+
+    monkeypatch.setattr(PROVIDER, "fetch_quota", fake_quota)
     payload = asyncio.run(control_plane.credit_summary())
+    assert payload["total_balance"] is None
     qclaw = next(item for item in payload["channels"] if item["id"] == "qclaw")
-    assert qclaw["unit"] == "credit"
-    assert qclaw["remaining"] is None
-    assert qclaw["unsupported"] is True
+    assert qclaw["unit"] == "token"
+    assert qclaw["remaining"] == 40
+    assert qclaw["used"] == 10
+    assert qclaw["limit"] == 50
+    assert qclaw["unsupported"] is False
+    workbuddy = next(item for item in payload["channels"] if item["id"] == "workbuddy")
+    assert workbuddy["unit"] == "credit"
 
 
 def test_startup_does_not_import_by_default(isolated_db, monkeypatch):

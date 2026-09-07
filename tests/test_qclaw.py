@@ -33,11 +33,34 @@ def qclaw_enabled(monkeypatch):
     monkeypatch.delenv("CB_GATEWAY_PROVIDERS", raising=False)
 
 
-def test_qclaw_quota_is_credit_not_token_cap(qclaw_enabled):
+def test_parse_today_tokens_used_and_limit():
+    from providers.qclaw.quota import parse_today_tokens
+
+    used, limit, remaining = parse_today_tokens({"today_used": 12, "today_limit": 100})
+    assert used == 12
+    assert limit == 100
+    assert remaining == 88
+    used, limit, remaining = parse_today_tokens(
+        {"daily_token_limit": 40_000_000, "daily_token_used": 0, "rpm_limit": 60}
+    )
+    assert (used, limit, remaining) == (0, 40_000_000, 40_000_000)
+    used, limit, remaining = parse_today_tokens({"data": {"used": 3, "quota": 10}})
+    assert (used, limit, remaining) == (3, 10, 7)
+    used, limit, remaining = parse_today_tokens({"foo": 1})
+    assert used is None and limit is None and remaining is None
+
+
+def test_qclaw_quota_uses_token_unit(qclaw_enabled, monkeypatch):
+    async def fake_today_tokens(account):
+        return {"used": 20, "limit": 80}
+
+    monkeypatch.setattr("providers.qclaw.quota.today_tokens", fake_today_tokens)
     snapshot = asyncio.run(providers.get_provider("qclaw").fetch_quota({"id": 1}))
-    assert snapshot.unit == "credit"
-    assert snapshot.remaining is None
-    assert snapshot.unsupported is True
+    assert snapshot.unit == "token"
+    assert snapshot.remaining == 60
+    assert snapshot.unsupported is False
+    assert snapshot.extra["used"] == 20
+    assert snapshot.extra["limit"] == 80
 
 
 def test_qclaw_in_default_registry(monkeypatch):

@@ -7,7 +7,7 @@ from typing import Optional
 import auth_manager
 import database as db
 from providers.protocol import ChannelId, QuotaSnapshot
-from providers.qclaw import chat, jprx, oauth, store
+from providers.qclaw import chat, jprx, oauth, quota, store
 from providers.qclaw.constants import (
     ALIASES,
     CHANNEL_ID,
@@ -81,16 +81,7 @@ class QClawProvider:
         return store.import_discovered(path)
 
     async def fetch_quota(self, account: dict) -> QuotaSnapshot:
-        # Official balance column is credit-only. QClaw's daily token cap is not 积分.
-        return QuotaSnapshot(
-            ok=True,
-            channel=self.id,
-            account_id=int(account.get("id") or 0),
-            unit="credit",
-            remaining=None,
-            unsupported=True,
-            message="no credit balance",
-        )
+        return await quota.fetch_quota(account)
 
     async def test_chat(self, account: dict, model: str = "default", prompt: str = "ping") -> dict:
         return await chat.test_chat(account, model, prompt)

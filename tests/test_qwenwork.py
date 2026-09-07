@@ -103,6 +103,16 @@ def test_parse_credentials_requires_token():
         parse_credentials({"user": {"id": "1"}})
 
 
+def test_qwenwork_quota_remaining_nested():
+    from providers.qwenwork import _quota_remaining
+
+    assert _quota_remaining({"quota": {"remaining": 88}}) == 88
+    assert _quota_remaining({"plan": {"credits": 12}}) == 12
+    assert _quota_remaining({"data": {"user": {}, "quota": {"balance": 3.5}}}) == 3.5
+    assert _quota_remaining({"code": 0, "data": {"quota": {"remaining": 2098.8}}}) == 2098.8
+    assert _quota_remaining({"foo": 1}) is None
+
+
 def test_bind_qwenwork_when_enabled(qwen_enabled):
     bound = router.bind({"model": "auto"}, {"default_channel": "qwenwork"})
     assert bound.channel == "qwenwork"
