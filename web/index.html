@@ -366,13 +366,14 @@ const I={
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
 };
+const localMode=/* LOCAL_MODE */ false;
 const api={
   async get(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{headers:h,credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
   async post(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'POST',headers:h,body:JSON.stringify(b),credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
   async put(p,b,t){const h={'Content-Type':'application/json'};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'PUT',headers:h,body:JSON.stringify(b),credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
   async del(p,t){const h={};if(t)h.Authorization='Bearer '+t;const r=await fetch(p,{method:'DELETE',headers:h,credentials:'same-origin'});if(!r.ok)throw new Error(r.status);return r.json()},
 };
-function apiErr(e,fallback='加载失败'){return e.message==='401'?'本机管理凭证无效，请刷新页面；远程访问时可在设置页填写备用 Token。':fallback}
+function apiErr(e,fallback='加载失败'){return e.message==='401'?'管理凭证无效，请在设置页填写配置的 Admin Token。':e.message==='403'?'请求来源不被允许，请使用网关的本机地址打开。':fallback}
 createApp({
   setup(){
     const validPages=['dashboard','accounts','keys','models','logs','settings'];
@@ -388,7 +389,7 @@ createApp({
   template:`
   <div class="layout">
     <header class="topbar">
-      <div class="brand-block"><div class="brand-symbol">B2</div><div class="brand-copy"><div class="brand-title">Buddy 2 API</div><div class="brand-meta">Local model gateway · v2.1.5</div></div></div>
+      <div class="brand-block"><div class="brand-symbol">B2</div><div class="brand-copy"><div class="brand-title">Buddy 2 API</div><div class="brand-meta">Local model gateway · v2.1.6</div></div></div>
       <nav class="topnav"><div v-for="n in nav" :key="n.k" class="nav-item" :class="{on:page===n.k}" @click="go(n.k)" v-html="n.i+'<span>'+n.l+'</span>'"></div></nav>
       <div class="top-actions">
         <button class="refresh-cta" @click="hardRefresh"><span v-html="I.refresh"></span><span>刷新</span></button>
@@ -458,7 +459,7 @@ createApp({
   <div class="phead"><h1>运行总览</h1><p>网关状态、额度和调用强度</p></div>
   <div class="tbar"><button class="btn s" @click="load(false)" :disabled="ld"><span v-html="I.refresh"></span>{{ld?'刷新中':'刷新'}}</button><button class="btn s" @click="refreshCredit" :disabled="cld||ld">{{cld?'刷新中':'强制刷新官方额度'}}</button><div class="spacer"></div><span class="tag" v-if="updatedAt">更新 {{updatedAt}}</span><span class="tag" v-if="s">Base URL · 127.0.0.1:8787/v1</span></div>
   <div v-if="ld" class="load"><div class="spin"></div></div>
-  <div class="card card-p empty" v-else-if="err"><div class="em">!</div><p style="font-weight:600;color:var(--fg)">{{err}}</p><p style="margin-top:6px">本机访问通常刷新页面即可重新获取管理凭证。</p></div>
+  <div class="card card-p empty" v-else-if="err"><div class="em">!</div><p style="font-weight:600;color:var(--fg)">{{err}}</p></div>
   <template v-else-if="s">
     <div class="dash-hero">
       <div>
@@ -970,7 +971,7 @@ createApp({
   <div class="card card-p empty" v-else><div class="em">📋</div><p>暂无记录</p></div>
 </div>`
 }).component('stgs',{props:['token','toast','saveToken'],setup(p){
-  const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,base_url:'http://127.0.0.1:8787/v1',admin_auth:'本机 Cookie 自动验证',data_file:'codebuddy_gateway.db'};
+  const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,base_url:'http://127.0.0.1:8787/v1',admin_auth:localMode?'本机自动授权':'Admin Token',data_file:'codebuddy_gateway.db'};
   const s=ref({...defaults}),stats=ref(null),ld=ref(true),saving=ref(false),copied=ref(''),setupTab=ref('codex'),adminToken=ref(p.token||'');
   const keysList=ref([]),codexKeyInput=ref(''),codexStatus=ref(null),codexBusy=ref(false),codexResult=ref(null);
   const presets={
@@ -1014,7 +1015,7 @@ createApp({
     }
     const x=currentPreset.value;return `curl ${x.base}/chat/completions \\\n  -H "Authorization: Bearer YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${x.model}","messages":[{"role":"user","content":"hi"}]}'`
   }
-  onMounted(load);return{s,stats,ld,saving,copied,setupTab,adminToken,presets,currentPreset,envBlock,curlBlock,load,save,resetDefaults,saveAdminToken,clearAdminToken,copy,n,I,keysList,codexKeyInput,codexStatus,codexBusy,codexResult,codexSetup}
+  onMounted(load);return{localMode,s,stats,ld,saving,copied,setupTab,adminToken,presets,currentPreset,envBlock,curlBlock,load,save,resetDefaults,saveAdminToken,clearAdminToken,copy,n,I,keysList,codexKeyInput,codexStatus,codexBusy,codexResult,codexSetup}
 },template:`
 <div>
   <div class="phead"><h1>设置</h1><p>运行配置、接入信息和本机维护</p></div>
@@ -1028,7 +1029,7 @@ createApp({
           <div class="field"><label>后端地址</label><input v-model="s.backend_url" placeholder="https://copilot.tencent.com"/><div class="hint">上游 Work Buddy 服务地址。</div></div>
           <div class="field"><label>默认域名</label><input v-model="s.default_domain" placeholder="www.codebuddy.cn"/><div class="hint">账号 auth 中没有 domain 时使用。</div></div>
           <div class="field"><label>请求超时（秒）</label><input v-model="s.timeout" type="number" min="30" max="900" placeholder="300"/><div class="hint">长上下文或慢模型建议保持 300。</div></div>
-          <div class="field"><label>管理鉴权</label><input v-model="s.admin_auth" disabled/><div class="hint">本机 Web UI 自动使用 HttpOnly Cookie。</div></div>
+          <div class="field"><label>管理鉴权</label><input v-model="s.admin_auth" disabled/></div>
         </div>
       </div>
       <div class="card">
@@ -1044,8 +1045,8 @@ createApp({
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-h">备用管理凭证<span class="sub">仅远程访问或 Cookie 失效时需要</span></div>
+    <div class="card" v-if="!localMode">
+      <div class="card-h">管理凭证</div>
       <div class="card-p">
         <div class="field">
           <label>Admin Token</label>
