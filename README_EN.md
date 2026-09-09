@@ -4,7 +4,9 @@
 
 > Local consumer AI clients → one OpenAI-compatible API for Codex, OpenCode, Cherry Studio, NextChat, and similar agents. Work Buddy / CodeBuddy, QClaw, QwenWork, and TraeWork are on by default; pick one in the UI dropdown. Each request stays on one channel.
 
-Release **2.1.5**. Local use only. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+Release **2.1.6**. Local use only. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+
+Default loopback startup opens the management page without an Admin Token. Restarting does not invalidate local access. Repeated startup opens the existing instance; a database can only be used by one process. Use `--no-browser` for background services. Setting `--admin-token` or `CB_GATEWAY_ADMIN_TOKEN` enables explicit token authentication and is required for non-loopback listeners. Enter that token in the management settings. Client API keys and upstream account credentials are unchanged.
 
 ## What is this?
 

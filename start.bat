@@ -92,4 +92,5 @@ pause
 exit /b 1
 
 :end
-pause
+if errorlevel 1 goto failed
+exit /b 0

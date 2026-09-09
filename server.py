@@ -12,18 +12,24 @@ FastAPI 应用，包含：
 import argparse
 import asyncio
 import contextvars
+import hashlib
+import ipaddress
 import json
 import os
 import secrets
+import socket
 import sys
 import tempfile
 import time
+import threading
+import webbrowser
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 
 import database as db
@@ -86,8 +92,8 @@ WEB_DIR = Path(__file__).parent / "web"
 
 ADMIN_TOKEN: str = ""
 ALLOW_NO_ADMIN_AUTH = False
+LOCAL_MODE = False
 ALLOW_UNAUTHENTICATED_API = _env_flag("CB_GATEWAY_ALLOW_UNAUTHENTICATED_API", False)
-ADMIN_COOKIE_NAME = "cb_gw_admin_token"
 MAX_BODY_BYTES = max(1024, _env_int("CB_GATEWAY_MAX_BODY_BYTES", 10 * 1024 * 1024))
 _CURRENT_REQUEST: contextvars.ContextVar[Request | None] = contextvars.ContextVar("current_request", default=None)
 
@@ -115,6 +121,9 @@ def _atomic_write(path: Path, content: str | bytes, mode: int = 0o600):
 
 @app.middleware("http")
 async def _request_context(request: Request, call_next):
+    management = request.url.path == "/" or request.url.path == "/admin" or request.url.path.startswith("/admin/")
+    if LOCAL_MODE and management and not _trusted_local_request(request):
+        return JSONResponse({"detail": "Local access requires a loopback host and same-origin request"}, status_code=403)
     token = _CURRENT_REQUEST.set(request)
     try:
         return await call_next(request)
@@ -122,17 +131,36 @@ async def _request_context(request: Request, call_next):
         _CURRENT_REQUEST.reset(token)
 
 
+def _trusted_local_request(request: Request) -> bool:
+    try:
+        if not request.client or not ipaddress.ip_address(request.client.host).is_loopback:
+            return False
+        if request.url.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return False
+        origin = request.headers.get("origin")
+        if origin:
+            parsed = urlsplit(origin)
+            if parsed.scheme != request.url.scheme or parsed.netloc != request.url.netloc:
+                return False
+        if request.headers.get("sec-fetch-site") not in {None, "none", "same-origin"}:
+            return False
+        return True
+    except ValueError:
+        return False
+
+
 def _check_admin(authorization: str | None):
+    if LOCAL_MODE:
+        request = _CURRENT_REQUEST.get()
+        if not request or not _trusted_local_request(request):
+            raise HTTPException(status_code=403, detail="Local management requires a trusted local request")
+        return
     if ALLOW_NO_ADMIN_AUTH:
         return
     candidates = []
     if authorization:
         parts = authorization.split(" ", 1)
         candidates.append(parts[1] if len(parts) == 2 else parts[0])
-
-    request = _CURRENT_REQUEST.get()
-    if request:
-        candidates.append(request.cookies.get(ADMIN_COOKIE_NAME, ""))
 
     if not any(t and secrets.compare_digest(t, ADMIN_TOKEN) for t in candidates):
         raise HTTPException(status_code=401, detail="Invalid admin token")
@@ -278,6 +306,7 @@ async def health():
         }
     return {
         "status": "ok",
+        "instance": _instance_id(),
         "version": VERSION,
         "accounts": len(accounts),
         "active_accounts": sum(1 for account in accounts if account.get("status") == "active"),
@@ -1214,16 +1243,9 @@ async def admin_update_aliases(
 
 @app.get("/")
 async def index(request: Request):
-    response = FileResponse(str(WEB_DIR / "index.html"))
-    if ADMIN_TOKEN and not ALLOW_NO_ADMIN_AUTH:
-        response.set_cookie(
-            ADMIN_COOKIE_NAME,
-            ADMIN_TOKEN,
-            httponly=True,
-            samesite="lax",
-            secure=request.url.scheme == "https" or _env_flag("CB_GATEWAY_SECURE_COOKIE"),
-            max_age=30 * 24 * 3600,
-        )
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    html = html.replace("/* LOCAL_MODE */ false", "true" if LOCAL_MODE else "false")
+    response = HTMLResponse(html, headers={"Cache-Control": "no-store", "Content-Security-Policy": "frame-ancestors 'none'"})
     return response
 
 
@@ -1231,25 +1253,100 @@ async def index(request: Request):
 # 启动
 # ============================================================
 
+def _instance_id():
+    return hashlib.sha256(str(db.DB_PATH.resolve()).encode()).hexdigest()
+
+
+def _lock_database():
+    path = Path(str(db.DB_PATH.resolve()) + ".instance.lock.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            if not handle.read(1):
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        raise RuntimeError("This database is already in use by another Buddy2api instance")
+    return handle
+
+
+def _open_when_ready(server, url):
+    while not server.started and not server.should_exit:
+        time.sleep(0.1)
+    if server.started:
+        webbrowser.open(url)
+
+
 def main():
-    global ADMIN_TOKEN, ALLOW_NO_ADMIN_AUTH
+    global ADMIN_TOKEN, ALLOW_NO_ADMIN_AUTH, LOCAL_MODE
 
     ap = argparse.ArgumentParser(description="Buddy 2 API")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--admin-token", default=os.environ.get("CB_GATEWAY_ADMIN_TOKEN", ""),
-                    help="Admin API token. Defaults to CB_GATEWAY_ADMIN_TOKEN or a generated startup token.")
+                    help="Explicit management token; required for non-loopback listeners.")
+    ap.add_argument("--no-browser", action="store_true", help="Do not open the local management page")
     ap.add_argument("--no-admin-auth", action="store_true",
-                    help="Disable Admin API authentication. Only use on trusted local machines.")
+                    help="Use automatic local management access with request-origin validation.")
     ap.add_argument("--log-level", default="warning", choices=["debug","info","warning","error"],
                     help="Log level")
     args = ap.parse_args()
+    if not 1 <= args.port <= 65535:
+        ap.error("--port must be between 1 and 65535")
 
     if args.no_admin_auth and args.host not in {"127.0.0.1", "localhost", "::1"}:
         ap.error("--no-admin-auth can only be used with a loopback host")
 
-    ALLOW_NO_ADMIN_AUTH = args.no_admin_auth
-    ADMIN_TOKEN = "" if ALLOW_NO_ADMIN_AUTH else (args.admin_token or f"cb-admin-{secrets.token_urlsafe(24)}")
+    local_host = args.host in {"127.0.0.1", "localhost", "::1"}
+    if not local_host and not args.admin_token:
+        ap.error("Remote access requires --admin-token or CB_GATEWAY_ADMIN_TOKEN")
+    LOCAL_MODE = local_host and (args.no_admin_auth or not args.admin_token)
+    ALLOW_NO_ADMIN_AUTH = False
+    ADMIN_TOKEN = "" if LOCAL_MODE else args.admin_token
+
+    host = "127.0.0.1" if args.host == "localhost" else args.host
+    url_host = f"[{host}]" if ":" in host else host
+    url = f"http://{url_host}:{args.port}"
+    listener = socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM)
+    if os.name == "nt":
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        listener.bind((host, args.port))
+        listener.listen(128)
+    except OSError as exc:
+        listener.close()
+        if local_host:
+            import httpx
+            for attempt in range(20):
+                try:
+                    with httpx.Client(trust_env=False, timeout=0.5) as client:
+                        reply = client.get(url + "/health")
+                    info = reply.json()
+                    if reply.status_code == 200 and isinstance(info, dict) and info.get("instance") == _instance_id():
+                        sys.stderr.write(f"Buddy2api is already running: {url}\n")
+                        if not args.no_browser:
+                            webbrowser.open(url)
+                        return
+                    break
+                except (httpx.HTTPError, ValueError):
+                    time.sleep(0.25)
+        ap.error(f"Cannot listen on {url}: {exc}")
+    try:
+        instance_lock = _lock_database()
+    except RuntimeError as exc:
+        listener.close()
+        ap.error(str(exc))
 
     db.init_db()
 
@@ -1266,12 +1363,20 @@ def main():
     sys.stderr.write(
         f"  启动导入: {'on' if control_plane.auto_import_enabled() else 'off (CB_GATEWAY_AUTO_IMPORT=1 可打开)'}\n"
     )
-    sys.stderr.write(f"  Admin: {'no auth' if ALLOW_NO_ADMIN_AUTH else 'enabled'}\n")
+    sys.stderr.write(f"  Admin: {'local automatic access' if LOCAL_MODE else 'token required'}\n")
     if ADMIN_TOKEN:
         sys.stderr.write("  Admin Token: configured (hidden)\n")
     sys.stderr.write(f"  ========================\n\n")
 
-    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
+    config = uvicorn.Config(app, host=host, port=args.port, log_level=args.log_level, proxy_headers=False)
+    server = uvicorn.Server(config)
+    if local_host and not args.no_browser:
+        threading.Thread(target=_open_when_ready, args=(server, url), daemon=True).start()
+    try:
+        server.run(sockets=[listener])
+    finally:
+        listener.close()
+        instance_lock.close()
 
 
 if __name__ == "__main__":
