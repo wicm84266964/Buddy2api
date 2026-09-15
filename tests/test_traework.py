@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,8 @@ from providers.traework.chat import (
     translate_model,
 )
 from providers.traework.crypto import decrypt_tc_b64
-from providers.traework.store import parse_credentials, traework_auth_dirs
+from providers.traework.store import parse_credentials, traework_auth_dirs, traework_user_data_dir
+from providers.traework.token import _device_info, _os_info
 
 
 @pytest.fixture()
@@ -213,6 +215,50 @@ def test_traework_auth_dirs_ignore_workbuddy_cb_auth_dir(monkeypatch, tmp_path):
     dirs = [path.resolve() for path in traework_auth_dirs()]
     assert tdir.resolve() in dirs
     assert wb.resolve() not in dirs
+
+
+def test_traework_user_data_dir_windows_keeps_appdata(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.delenv("CB_TRAEWORK_USER_DATA_DIR", raising=False)
+    assert traework_user_data_dir() == tmp_path / "Roaming" / "TRAE SOLO CN"
+
+
+def test_traework_user_data_dir_darwin_uses_application_support(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("CB_TRAEWORK_USER_DATA_DIR", raising=False)
+    assert traework_user_data_dir() == tmp_path / "Library" / "Application Support" / "TRAE SOLO CN"
+    folders = traework_auth_dirs()
+    assert tmp_path / "Library" / "Application Support" / "TRAE SOLO CN" / "User" / "globalStorage" in folders
+
+
+def test_device_info_windows_osinfo_unchanged(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.delenv("CB_TRAEWORK_OS_INFO", raising=False)
+    monkeypatch.delenv("CB_TRAEWORK_DEVICE_NAME", raising=False)
+    monkeypatch.setenv("COMPUTERNAME", "DESKTOP-TEST")
+    info = _device_info({"extra": {"device_id": "1", "machine_id": "m"}})
+    assert info["OSInfo"] == "windows"
+    assert info["DeviceName"] == "DESKTOP-TEST"
+    assert info["DeviceType"] == "PC"
+    assert info["DeviceID"] == "1"
+
+
+def test_device_info_darwin_osinfo(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.delenv("CB_TRAEWORK_OS_INFO", raising=False)
+    monkeypatch.delenv("CB_TRAEWORK_DEVICE_NAME", raising=False)
+    monkeypatch.setenv("USER", "macuser")
+    info = _device_info({"extra": {}})
+    assert info["OSInfo"] == "mac"
+    assert info["DeviceName"] == "macuser"
+    assert info["DeviceType"] == "PC"
+
+
+def test_os_info_env_override(monkeypatch):
+    monkeypatch.setenv("CB_TRAEWORK_OS_INFO", "macOS 15.6")
+    assert _os_info() == "macOS 15.6"
 
 
 def test_decrypt_tc_roundtrip_rejects_garbage():

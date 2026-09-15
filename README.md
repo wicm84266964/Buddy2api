@@ -23,7 +23,7 @@ python server.py
 | WorkBuddy / CodeBuddy | 开 | `%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth` |
 | QClaw | 开 | `%APPDATA%\QClaw` |
 | 千问办公 QwenWork | 开 | `%APPDATA%\QwenWorkCN` |
-| TraeWork | 开 | `%APPDATA%\TRAE SOLO CN\User\globalStorage` |
+| TraeWork | 开 | Windows：`%APPDATA%\TRAE SOLO CN\User\globalStorage`；macOS：`~/Library/Application Support/TRAE SOLO CN/User/globalStorage` |
 
 路径不对时可用 `CB_AUTH_DIR`、`CB_QCLAW_AUTH_DIR`、`CB_QWENWORK_AUTH_DIR`、`CB_TRAEWORK_AUTH_DIR` 指定。四个通道的登录文件不要混在同一个目录。只要其中一家时，可设 `CB_GATEWAY_PROVIDERS=workbuddy` 收窄。
 
@@ -233,6 +233,7 @@ QwenWork、QClaw、TraeWork 各用自己那把 Key，不要混用。
 | `CB_QCLAW_AUTH_DIR` | QClaw 登录目录 |
 | `CB_QWENWORK_AUTH_DIR` | QwenWork 登录目录 |
 | `CB_TRAEWORK_AUTH_DIR` | TraeWork `storage.json` 所在目录 |
+| `CB_TRAEWORK_OS_INFO` | TraeWork 刷新时的 `OSInfo`。默认 Windows 为 `windows`，macOS 为 `mac` |
 | `CB_HOST_AUTH_DIR` | Docker 脚本用的本机 WorkBuddy 目录 |
 | `CB_GATEWAY_ADMIN_TOKEN` | 固定管理 Token |
 | `CB_GATEWAY_DB_PATH` | 数据库路径 |
