@@ -840,7 +840,7 @@ async def _json_chat_with_stall_retry(
             auth_manager.mark_account_failure(account["id"], 401)
             continue
 
-        url = f"{auth_manager.backend_url()}/v2/chat/completions"
+        url = f"{auth_manager.backend_url(account)}/v2/chat/completions"
         t0 = time.time()
         result = await _collect_stream(url, headers, body, account, api_key_info, model_name, t0)
         if result[0] == "json":
@@ -961,7 +961,7 @@ async def test_account_chat(account: dict, model: str = "auto", prompt: str = "p
         "messages": [{"role": "user", "content": prompt or "ping"}],
         "stream": False,
     })
-    url = f"{auth_manager.backend_url()}/v2/chat/completions"
+    url = f"{auth_manager.backend_url(account)}/v2/chat/completions"
     t0 = time.time()
     result = await _collect_stream(url, headers, body, account, None, f"account-test:{model or 'auto'}", t0)
     duration_ms = int((time.time() - t0) * 1000)
@@ -1039,7 +1039,7 @@ async def _stream_upstream(
             last_status = 401
             continue
 
-        url = f"{auth_manager.backend_url()}/v2/chat/completions"
+        url = f"{auth_manager.backend_url(account)}/v2/chat/completions"
         t0 = time.time()
         last_started = t0
         observer = _ChatStreamObserver(body.get("model") or model_name, body.get("n", 1))

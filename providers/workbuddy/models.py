@@ -77,7 +77,7 @@ async def fetch_supplier_models(account: dict) -> list[dict]:
     headers = dict(headers)
     headers.pop("Content-Type", None)
     headers["Accept"] = "application/json"
-    url = f"{auth_manager.backend_url()}{MODELS_PATH}"
+    url = f"{auth_manager.backend_url(account)}{MODELS_PATH}"
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, headers=headers)
     if response.status_code >= 400:
