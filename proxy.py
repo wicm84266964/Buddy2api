@@ -958,7 +958,7 @@ async def test_account_chat(account: dict, model: str = "auto", prompt: str = "p
 
     body = build_backend_body({
         "model": model or "auto",
-        "messages": [{"role": "user", "content": prompt or "ping"}],
+        "messages": [{"role": "system", "content": "You are a helpful assistant."},{"role": "user", "content": prompt or "ping"}],
         "stream": False,
     })
     url = f"{auth_manager.backend_url(account)}/v2/chat/completions"
