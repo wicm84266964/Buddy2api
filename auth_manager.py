@@ -48,8 +48,9 @@ def _get_token_lock(aid: int) -> asyncio.Lock:
         return _token_locks[aid]
 
 
-def backend_url() -> str:
+def backend_url(account: dict) -> str:
     value = str(db.get_setting("backend_url", BACKEND) or BACKEND).strip().rstrip("/")
+    value = 'https://www.workbuddy.ai' if 'www.workbuddy.ai' == account["domain"] else value
     return value if value.startswith("https://") else BACKEND
 
 
@@ -362,7 +363,7 @@ async def refresh_token(account: dict) -> bool:
     lock = _get_token_lock(aid)
     async with lock:
         headers = build_refresh_headers(account)
-        url = f"{backend_url()}/v2/plugin/auth/token/refresh"
+        url = f"{backend_url(account)}/v2/plugin/auth/token/refresh"
 
         try:
             async with httpx.AsyncClient(timeout=request_timeout(15)) as c:
@@ -678,7 +679,7 @@ async def fetch_account_resources(
 
     try:
         async with httpx.AsyncClient(timeout=request_timeout(25)) as c:
-            r = await c.post(f"{backend_url()}/v2/billing/meter/get-user-resource", headers=headers, json={})
+            r = await c.post(f"{backend_url(account)}/v2/billing/meter/get-user-resource", headers=headers, json={})
             data = r.json()
     except (httpx.HTTPError, ValueError) as e:
         return _resource_failure(
@@ -800,7 +801,7 @@ async def fetch_checkin_status(
 
     try:
         async with httpx.AsyncClient(timeout=request_timeout(20)) as c:
-            r = await c.post(f"{backend_url()}/v2/billing/meter/checkin-activity-status", headers=headers, json={})
+            r = await c.post(f"{backend_url(account)}/v2/billing/meter/checkin-activity-status", headers=headers, json={})
             data = r.json()
     except (httpx.HTTPError, ValueError) as e:
         return _checkin_failure(account, status_code=0, message=str(e)[:240], allow_stale=allow_stale)
@@ -854,7 +855,7 @@ async def claim_daily_checkin(account: dict) -> dict:
 
     try:
         async with httpx.AsyncClient(timeout=request_timeout(30)) as c:
-            r = await c.post(f"{backend_url()}/v2/billing/meter/daily-checkin", headers=headers, json={})
+            r = await c.post(f"{backend_url(account)}/v2/billing/meter/daily-checkin", headers=headers, json={})
             data = r.json()
     except (httpx.HTTPError, ValueError) as e:
         return _checkin_result(account, ok=False, status_code=0, message=str(e)[:240])

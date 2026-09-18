@@ -73,7 +73,7 @@ async def proxy_chat_completions(...):
     ...
     account = await auth_manager.pick_account_with_fallback(tried_ids)
     ...
-    url = f"{auth_manager.backend_url()}/v2/chat/completions"
+    url = f"{auth_manager.backend_url(account)}/v2/chat/completions"
 ```
 
 ```917:960:auth_manager.py
