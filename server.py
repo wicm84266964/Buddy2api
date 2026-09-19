@@ -1392,6 +1392,20 @@ def main():
         threading.Thread(target=_open_when_ready, args=(server, url), daemon=True).start()
     try:
         server.run(sockets=[listener])
+    except TypeError as e:
+        if "unexpected keyword argument 'loop_factory'" in str(e):
+            # pydevd (PyCharm <=2025.1) wraps asyncio.run with a signature that
+            # rejects uvicorn 0.52's loop_factory kwarg, so drive the loop directly.
+            loop_factory = server.config.get_loop_factory()
+            loop = loop_factory() if loop_factory else asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(server.serve(sockets=[listener]))
+            finally:
+                try:
+                    asyncio.set_event_loop(None)
+                finally:
+                    loop.close()
     finally:
         listener.close()
         instance_lock.close()
