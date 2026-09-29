@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,12 +20,21 @@ from providers.traework.constants import (
 from providers.traework.crypto import decrypt_tc_b64
 
 
+APP_SUPPORT_NAME = "TRAE SOLO CN"
+
+
 def traework_user_data_dir() -> Path:
     override = os.environ.get("CB_TRAEWORK_USER_DATA_DIR", "").strip()
     if override:
         return Path(override).expanduser()
-    appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    return Path(appdata) / "TRAE SOLO CN"
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / APP_SUPPORT_NAME
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA") or str(home / "AppData" / "Roaming")
+        return Path(appdata) / APP_SUPPORT_NAME
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    return xdg / APP_SUPPORT_NAME
 
 
 def traework_auth_dirs() -> list[Path]:
