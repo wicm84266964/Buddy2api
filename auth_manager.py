@@ -334,20 +334,30 @@ def resolve_atrest_fields(values: dict) -> tuple[dict, str]:
         )
     if not any(mod.is_envelope(v) for v in values.values()):
         return plain, ""
-    try:
-        # wb_atrest 负责唯一的密钥缓存，并在每次使用前校验当前 keyblob。
-        key = mod.recover_key()
-    except Exception as exc:
-        return (
-            {k: ("" if mod.is_envelope(v) else plain[k]) for k, v in values.items()},
-            f"at-rest 密钥回收失败（客户端没在跑？）: {exc}",
-        )
+    # ★2026-10-27: 字段信封可能用「托管包装密钥」或「keyblob 主密钥」加密，取决于
+    # 客户端版本 → 先按信封 keyId 取候选密钥（[包装密钥, 主密钥]），再逐个试解；
+    # 只用 recover_key() 的主密钥会在新客户端上全部失败（scan 报 skipped，渠道 0 active）。
+    # 候选仍由 recover_key() 提供，保留其「每次使用前校验当前 keyblob」的轮换语义。
+    auto = getattr(mod, "decrypt_field_auto", None)
+    keys = None
+    if auto is not None and hasattr(mod, "candidate_keys"):
+        try:
+            keys = mod.candidate_keys()
+        except Exception as exc:
+            # 与只用主密钥时的失败口径保持一致（同一条 at-rest 原因串）。
+            return (
+                {k: ("" if mod.is_envelope(v) else plain[k]) for k, v in values.items()},
+                f"at-rest 密钥回收失败（客户端没在跑？）: {exc}",
+            )
     out = {}
     errors = []
     for name, value in values.items():
         if mod.is_envelope(value):
             try:
-                out[name] = mod.decrypt_field(key, value) or ""
+                if auto is not None:
+                    out[name] = auto(value, keys=keys) or ""
+                else:
+                    out[name] = mod.decrypt_field(mod.recover_key(), value) or ""
             except Exception as exc:
                 errors.append(f"{name} 解密失败: {exc}")
                 out[name] = ""

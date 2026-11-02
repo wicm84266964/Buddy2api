@@ -165,6 +165,48 @@ def decrypt_field(key, value):
     return open_envelope(key, value, "field").decode("utf-8", "replace")
 
 
+def candidate_keys(log=None):
+    """返回可用于解开字段信封的候选密钥，顺序：[包装密钥, 主密钥]。
+
+    ★客户端不同版本用不同密钥加密 .info 字段：老版本用 keyblob 解出的主密钥
+    （keyId == keyblob.keyId），2026-10 起的客户端用托管包装密钥（keyId ==
+    static-v1 槽的 protectorKeyId）。两者都要试，否则扫描导入全部失败。
+
+    密钥统一走 ``recover_key()``：它负责内存缓存 + 每次使用前校验当前 keyblob
+    （客户端轮换密钥后缓存自动失效并重扫），本函数只做「两个候选取值」，
+    不自行碰缓存，避免绕过轮换校验。
+    """
+    master = recover_key()
+    with _KEY_LOCK:
+        wrapper = _KEY_CACHE["key"]
+    keys = []
+    if wrapper:
+        keys.append(wrapper)
+    if master:
+        keys.append(master)
+    return keys
+
+
+def decrypt_field_auto(value, keys=None):
+    """按信封 keyId 自动选密钥（包装/主密钥）解字段；非信封原样返回。
+
+    ``keys`` 可传入一次性取好的候选（调用方按批复用，避免逐字段回收密钥）。
+    """
+    if value is None or value == "":
+        return ""
+    if not is_envelope(value):
+        return value if isinstance(value, str) else None
+    if keys is None:
+        keys = candidate_keys()
+    errors = []
+    for key in keys:
+        try:
+            return decrypt_field(key, value)
+        except Exception as exc:
+            errors.append(str(exc))
+    raise AtRestError("; ".join(errors) or "没有可用密钥")
+
+
 # ----------------------------------------------------------------- 纯 Python AES
 def _build_sbox():
     sbox = [0] * 256

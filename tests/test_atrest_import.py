@@ -213,3 +213,56 @@ def test_gcm_matches_independent_cryptography_implementation():
     env["authTag"] = bytes([env["authTag"][0] ^ 1]) + env["authTag"][1:]
     with pytest.raises(wb_atrest.AtRestError):
         wb_atrest._gcm_open(KEY, env["nonce"], aad, env["ciphertext"], env["authTag"])
+
+
+def test_field_sealed_with_wrapper_key_imports(tmp_path, monkeypatch):
+    """2026-10 起的客户端用「托管包装密钥」加密 .info 字段（不是 keyblob 主密钥）。
+
+    信封 keyId == static-v1 槽的 protectorKeyId，与 recover_key() 返回的主密钥
+    派生出的 keyId 不同 → 只用主密钥解会全部失败（scan 报 skipped、渠道 0 active），
+    必须按信封 keyId 在 [包装密钥, 主密钥] 里自动选钥。
+    """
+    # 还原被 autouse fixture 替换掉的 recover_key，走真实 keyblob 路径。
+    monkeypatch.undo()
+    monkeypatch.setenv("WORKBUDDY_CONFIG_DIR", str(tmp_path))
+    protector, master = KEY, bytes(range(32, 64))
+    blob = {"keyId": wb_atrest.derive_key_id(master), "slots": [{
+        "type": "static-v1", "protectorKeyId": wb_atrest.derive_key_id(protector),
+        "wrapped": wb_atrest.seal(protector, master, "file")}]}
+    (tmp_path / "keyblob").write_text(json.dumps(blob), encoding="utf-8")
+    monkeypatch.setattr(wb_atrest, "hunt_key", lambda **kwargs: protector.hex())
+    wb_atrest.forget_key()
+    try:
+        doc = _write_auth_doc(
+            tmp_path / "wrapper.info",
+            wb_atrest.seal(protector, "tok-at", "field"),
+            wb_atrest.seal(protector, "tok-rt", "field"),
+            "昵称", "13800000000")
+        parsed = auth_manager.parse_auth_file(doc)
+        assert parsed is not None
+        assert parsed["access_token"] == "tok-at"
+        assert parsed["refresh_token"] == "tok-rt"
+        assert parsed["nickname"] == "昵称"
+    finally:
+        wb_atrest.forget_key()
+
+
+def test_key_recovery_failure_keeps_at_rest_reason():
+    """密钥回收失败时原因串须仍是 at-rest 口径（各字段不重复刷错）。
+
+    上游 test_control_plane 依赖该原因串含 "at-rest"；Linux CI 上 recover_key 必然抛
+    「只支持 Windows」，若不提前统一取钥，会变成逐字段的「xxx 解密失败」而丢失口径。
+    """
+    sealed = _sealed("tok")
+    def unavailable():
+        raise wb_atrest.AtRestError("只支持 Windows")
+    original = wb_atrest.recover_key
+    wb_atrest.recover_key = unavailable
+    try:
+        out, err = auth_manager.resolve_atrest_fields({"access_token": sealed, "nickname": "n"})
+    finally:
+        wb_atrest.recover_key = original
+    assert out["access_token"] == ""
+    assert out["nickname"] == "n"
+    assert "at-rest" in err
+    assert err.count("解密失败") == 0
