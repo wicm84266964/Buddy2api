@@ -178,10 +178,64 @@ def _log(action: str, channel: str, before: int, after: int) -> None:
     sys.stderr.flush()
 
 
+# ---- 发送前上下文预算：按渠道可配 ----
+# 背景: 部分上游(如 WorkBuddy)除窗口长度外还按 token 计「用量频率」(5 分钟滚动窗口)。
+#   窗口没超，但单条几十万 token 的历史请求会在几分钟内烧穿额度并触发限频；
+#   网关侧先按渠道裁一刀，比让上游报错更省事，也保护共享账号。
+# 配置(只读环境变量，请求路径上不碰数据库):
+#   CB_PRETRIM_CHANNELS="workbuddy=150000,workbuddy-i=150000"  按渠道覆盖，0=该渠道不预裁
+#   CB_PRETRIM_BUDGET=150000                                   全局兜底，0=全部不预裁
+#   CB_LOOMY_CONTEXT_BUDGET                                    loomy 沿用原变量，语义不变
+# 优先级: loomy 专用变量 > 渠道表 > 全局兜底 > 不预裁
+DEFAULT_PRETRIM_CHANNELS = {"workbuddy": 150_000, "workbuddy-i": 150_000}
+
+# 防御性上限: 配置写错(如多打几个零)时不至于把请求裁成空壳
+_MAX_PRETRIM_BUDGET = 2_000_000
+
+
+def _parse_channel_budget(value) -> int:
+    """把配置值转成预算；非法值按 0(不预裁) 处理，绝不回落到其它渠道的默认值。"""
+    try:
+        return max(0, min(int(str(value).strip()), _MAX_PRETRIM_BUDGET))
+    except (TypeError, ValueError):
+        return 0
+
+
+def pretrim_channels() -> dict:
+    """渠道名 -> 发送前裁剪预算(token)；未列出的渠道走全局兜底(见 channel_input_budget)。"""
+    # 纯读 env: 请求路径上不要读数据库(网关持有写锁时会阻塞)。
+    raw = os.environ.get("CB_PRETRIM_CHANNELS")
+    if raw is None or str(raw).strip() == "":
+        return dict(DEFAULT_PRETRIM_CHANNELS)
+    table = {}
+    for part in str(raw).replace(";", ",").split(","):
+        name, _, value = part.partition("=")
+        if name.strip():
+            table[name.strip()] = _parse_channel_budget(value)
+    return table
+
+
+def global_pretrim_budget() -> int:
+    """全局兜底预算: 让任意渠道都能被一条环境变量管住，不必改代码。0=关闭。"""
+    return _parse_channel_budget(os.environ.get("CB_PRETRIM_BUDGET", ""))
+
+
+def channel_input_budget(channel: str) -> int:
+    """该渠道的发送前预算；0 表示不预裁。loomy 语义与原实现一致。
+
+    优先级: 渠道表(DEFAULT_PRETRIM_CHANNELS / CB_PRETRIM_CHANNELS)
+            > 全局兜底(CB_PRETRIM_BUDGET) > 不预裁(0)。
+    """
+    if channel == "loomy":
+        return loomy_input_budget()
+    table = pretrim_channels()
+    if channel in table:
+        return table[channel]
+    return global_pretrim_budget()
+
+
 def prepare_dispatch(channel: str, payload: dict) -> tuple[dict, bool]:
-    if channel != "loomy":
-        return payload, False
-    budget = loomy_input_budget()
+    budget = channel_input_budget(channel)
     if budget <= 0:
         return payload, False
     limit = input_limit(payload, budget)
@@ -256,7 +310,9 @@ async def dispatch_with_context_policy(provider, channel: str, payload: dict, in
     import router
 
     dispatch, pretrimmed = prepare_dispatch(channel, payload)
-    if pretrimmed and still_over(dispatch, input_limit(payload, loomy_input_budget() or DEFAULT_LOOMY_INPUT_BUDGET)):
+    # 复核用的额度必须与本渠道一致(原来写死用 loomy 的额度)
+    budget = channel_input_budget(channel)
+    if pretrimmed and budget > 0 and still_over(dispatch, input_limit(payload, budget)):
         return readable_error(channel, kind="context", trimmed=True, status=400)
     result = await provider.chat_completions(dispatch, info)
     return await _recover(provider, channel, dispatch, info, result, pretrimmed, router.estimate_prompt_tokens(dispatch))

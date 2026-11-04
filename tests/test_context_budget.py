@@ -24,10 +24,41 @@ def test_loomy_pretrim_drops_old_history_and_keeps_latest(monkeypatch):
     assert router.estimate_prompt_tokens(trimmed) <= context_budget.input_limit(payload, 500)
 
 
-def test_workbuddy_is_not_pretrimmed(monkeypatch):
+def test_workbuddy_pretrims_above_its_own_budget(monkeypatch):
+    # workbuddy 的预算与 loomy 各自独立，不再共用 loomy 的额度
     monkeypatch.setenv("CB_LOOMY_CONTEXT_BUDGET", "500")
+    monkeypatch.setenv("CB_PRETRIM_CHANNELS", "workbuddy=500")
     payload = _long_chat(10, 40)
     trimmed, changed = context_budget.prepare_dispatch("workbuddy", payload)
+    assert changed is True
+    assert trimmed["messages"][-1]["content"] == "最新问题"
+    assert router.estimate_prompt_tokens(trimmed) <= context_budget.input_limit(payload, 500)
+
+
+def test_workbuddy_default_budget_does_not_touch_short_chat(monkeypatch):
+    monkeypatch.setenv("CB_PRETRIM_CHANNELS", "")
+    payload = _long_chat(10, 40)
+    trimmed, changed = context_budget.prepare_dispatch("workbuddy", payload)
+    assert changed is False
+    assert trimmed is payload
+
+
+def test_global_budget_covers_any_channel(monkeypatch):
+    # 全局兜底: 不用改代码、不用逐个列渠道，一条变量即可覆盖任意渠道
+    monkeypatch.setenv("CB_PRETRIM_CHANNELS", "")
+    monkeypatch.setenv("CB_PRETRIM_BUDGET", "500")
+    payload = _long_chat(10, 40)
+    trimmed, changed = context_budget.prepare_dispatch("qwenwork", payload)
+    assert changed is True
+    assert trimmed["messages"][-1]["content"] == "最新问题"
+    assert router.estimate_prompt_tokens(trimmed) <= context_budget.input_limit(payload, 500)
+
+
+def test_unknown_channel_is_never_pretrimmed(monkeypatch):
+    monkeypatch.setenv("CB_PRETRIM_CHANNELS", "")
+    monkeypatch.delenv("CB_PRETRIM_BUDGET", raising=False)
+    payload = _long_chat(10, 40)
+    trimmed, changed = context_budget.prepare_dispatch("traework", payload)
     assert changed is False
     assert trimmed is payload
 
