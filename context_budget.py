@@ -187,7 +187,8 @@ def _log(action: str, channel: str, before: int, after: int) -> None:
 #   CB_PRETRIM_BUDGET=150000                                   全局兜底，0=全部不预裁
 #   CB_LOOMY_CONTEXT_BUDGET                                    loomy 沿用原变量，语义不变
 # 优先级: loomy 专用变量 > 渠道表 > 全局兜底 > 不预裁
-DEFAULT_PRETRIM_CHANNELS = {"workbuddy": 150_000, "workbuddy-i": 150_000}
+# 除 Loomy 沿用原预算外，其余渠道须显式配置才启用发送前裁剪。
+DEFAULT_PRETRIM_CHANNELS = {}
 
 # 防御性上限: 配置写错(如多打几个零)时不至于把请求裁成空壳
 _MAX_PRETRIM_BUDGET = 2_000_000

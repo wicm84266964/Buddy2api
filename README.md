@@ -298,7 +298,7 @@ QwenWork、TraeWork、Loomy、小浣熊各用自己那把 Key，不要混用。�
 | `CB_TRAEWORK_AUTH_DIR` | TraeWork `storage.json` 所在目录 |
 | `CB_LOOMY_AUTH_DIR` | Loomy 数据根目录，下面应有 `*/userData/auth-session.json` |
 | `CB_LOOMY_CONTEXT_BUDGET` | Loomy 发送前上下文预算，默认 `160000`。`0` 关闭发送前裁剪 |
-| `CB_PRETRIM_CHANNELS` | 按通道设置发送前上下文预算，逗号分隔 `通道=token`，如 `workbuddy=150000`；`0` 表示该通道不裁。不设时 WorkBuddy 系默认 `150000` |
+| `CB_PRETRIM_CHANNELS` | 按通道设置发送前上下文预算，逗号分隔 `通道=token`，如 `workbuddy=150000`；`0` 表示该通道不裁。除 Loomy 沿用原预算外，其他通道（含 WorkBuddy 国内/国际）默认不预裁，需显式配置此项或全局兜底预算后启用 |
 | `CB_PRETRIM_BUDGET` | 未在 `CB_PRETRIM_CHANNELS` 中列出的通道的兜底预算，默认 `0`（不裁）。上游按 token 计用量频率时很有用 |
 | `CB_GATEWAY_MAX_BODY_BYTES` | 请求体上限，默认 `33554432`（32 MiB） |
 | `CB_XHX_AUTH_DIR` | 小浣熊 `auth.json` 所在目录或文件。不设时扫描新版 `.office-raccoon\agent\config\auth.json` 和旧版 `.box-agent\config\auth.json` |
