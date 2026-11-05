@@ -78,6 +78,9 @@ def _cors_origins() -> list[str]:
 
 @asynccontextmanager
 async def _lifespan(_app):
+    import context_budget
+
+    context_budget.load_saved_channel_budgets()
     control_plane.start_keepalive()
     try:
         yield
@@ -1333,6 +1336,7 @@ async def admin_update_settings(
         "auto_checkin_enabled",
         "auto_checkin_hour",
         "loomy_context_budget",
+        "context_channel_budgets",
     }
     unknown = set(data) - allowed_settings
     if unknown:
@@ -1350,6 +1354,15 @@ async def admin_update_settings(
         if not 0 <= hour <= 23:
             raise HTTPException(status_code=400, detail=f"{hour_key} must be an integer between 0 and 23")
         data[hour_key] = hour
+    if "context_channel_budgets" in data:
+        budgets = data["context_channel_budgets"]
+        if not isinstance(budgets, dict):
+            raise HTTPException(status_code=400, detail="context_channel_budgets must be an object")
+        for channel, budget in budgets.items():
+            if channel not in providers.DEFAULT_PROVIDER_IDS or channel == "loomy":
+                raise HTTPException(status_code=400, detail=f"Unsupported budget channel: {channel}")
+            if type(budget) is not int or not 0 <= budget <= 2_000_000:
+                raise HTTPException(status_code=400, detail=f"Budget for {channel} must be an integer between 0 and 2000000")
     if "loomy_context_budget" in data:
         try:
             budget = int(data["loomy_context_budget"])
@@ -1370,6 +1383,10 @@ async def admin_update_settings(
         data["backend_url"] = backend_url
     for k, v in data.items():
         db.set_setting(k, v)
+    if "context_channel_budgets" in data:
+        import context_budget
+
+        context_budget.set_saved_channel_budgets(data["context_channel_budgets"])
     return {"status": "ok"}
 
 

@@ -143,12 +143,30 @@ def test_small_html_error_is_rewritten_without_retry():
     assert "<html>" not in result[1][1]["error"]["message"]
 
 
-def test_settings_keeps_loomy_budget_outside_automation():
+def test_settings_keeps_channel_budgets_outside_automation():
     text = Path("web/index.html").read_text(encoding="utf-8")
     automation = text.split('<div class="card-h">自动化<span', 1)[1].split('<div class="card-h">自动化日志', 1)[0]
     assert "loomy_context_budget" not in automation
     budget = text.split('<div class="card-h">上下文预算', 1)[1].split('<div class="card-h">后端参数', 1)[0]
-    assert 'v-model.number="s.loomy_context_budget"' in budget
-    assert "默认 160000 token" in budget
+    assert 'v-model="budgetChannel"' in budget
+    assert 'value="*"' in budget
+    assert "应用到全部渠道" in budget
+    assert "默认 Loomy 160000 token，其他渠道默认关闭" in budget
     assert "填 0 关闭发送前裁剪" in budget
-    assert "CB_LOOMY_CONTEXT_BUDGET 可覆盖" in budget
+    assert "CB_LOOMY_CONTEXT_BUDGET 覆盖" in budget
+
+
+def test_saved_budget_applies_without_reading_database(monkeypatch):
+    import database as db
+    monkeypatch.delenv("CB_PRETRIM_CHANNELS", raising=False)
+    monkeypatch.setenv("CB_PRETRIM_BUDGET", "800")
+    monkeypatch.setattr(context_budget, "_saved_channel_budgets", {"workbuddy": 500, "qwenwork": 0})
+    monkeypatch.setattr(db, "get_setting", lambda *args: pytest.fail("dispatch must not read settings"))
+    payload = _long_chat(10, 40)
+    trimmed, changed = context_budget.prepare_dispatch("workbuddy", payload)
+    assert changed
+    assert router.estimate_prompt_tokens(trimmed) <= context_budget.input_limit(payload, 500)
+    assert context_budget.channel_input_budget("qwenwork") == 0
+    assert context_budget.channel_input_budget("traework") == 800
+    monkeypatch.setenv("CB_PRETRIM_CHANNELS", "workbuddy=0")
+    assert context_budget.channel_input_budget("workbuddy") == 0

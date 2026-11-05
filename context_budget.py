@@ -1,6 +1,7 @@
 """Context budget for long chats.
 
-Loomy is trimmed before send. Every channel may trim once after the upstream
+Channels can opt into trimming before send; Loomy enables it by default.
+Every channel may trim once after the upstream
 rejects the context. The advertised catalog window is left unchanged.
 """
 
@@ -182,13 +183,28 @@ def _log(action: str, channel: str, before: int, after: int) -> None:
 # 背景: 部分上游(如 WorkBuddy)除窗口长度外还按 token 计「用量频率」(5 分钟滚动窗口)。
 #   窗口没超，但单条几十万 token 的历史请求会在几分钟内烧穿额度并触发限频；
 #   网关侧先按渠道裁一刀，比让上游报错更省事，也保护共享账号。
-# 配置(只读环境变量，请求路径上不碰数据库):
+# 配置(环境变量优先于管理页保存值，请求路径只读内存快照):
 #   CB_PRETRIM_CHANNELS="workbuddy=150000,workbuddy-i=150000"  按渠道覆盖，0=该渠道不预裁
 #   CB_PRETRIM_BUDGET=150000                                   全局兜底，0=全部不预裁
 #   CB_LOOMY_CONTEXT_BUDGET                                    loomy 沿用原变量，语义不变
-# 优先级: loomy 专用变量 > 渠道表 > 全局兜底 > 不预裁
+# 优先级: Loomy 沿用专用配置；其他渠道为环境渠道表 > 保存的渠道预算 > 全局兜底 > 不预裁
 # 除 Loomy 沿用原预算外，其余渠道须显式配置才启用发送前裁剪。
 DEFAULT_PRETRIM_CHANNELS = {}
+
+# Immutable snapshots replaced at startup and after saving admin settings.
+_saved_channel_budgets: dict[str, int] = {}
+
+
+def set_saved_channel_budgets(value: dict) -> None:
+    global _saved_channel_budgets
+    _saved_channel_budgets = dict(value)
+
+
+def load_saved_channel_budgets() -> None:
+    import database as db
+
+    value = db.get_setting("context_channel_budgets", {})
+    set_saved_channel_budgets(value if isinstance(value, dict) else {})
 
 # 防御性上限: 配置写错(如多打几个零)时不至于把请求裁成空壳
 _MAX_PRETRIM_BUDGET = 2_000_000
@@ -224,7 +240,7 @@ def global_pretrim_budget() -> int:
 def channel_input_budget(channel: str) -> int:
     """该渠道的发送前预算；0 表示不预裁。loomy 语义与原实现一致。
 
-    优先级: 渠道表(DEFAULT_PRETRIM_CHANNELS / CB_PRETRIM_CHANNELS)
+    优先级: 环境渠道表 > 管理页保存的渠道预算
             > 全局兜底(CB_PRETRIM_BUDGET) > 不预裁(0)。
     """
     if channel == "loomy":
@@ -232,6 +248,8 @@ def channel_input_budget(channel: str) -> int:
     table = pretrim_channels()
     if channel in table:
         return table[channel]
+    if channel in _saved_channel_budgets:
+        return _saved_channel_budgets[channel]
     return global_pretrim_budget()
 
 

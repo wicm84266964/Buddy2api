@@ -557,3 +557,30 @@ def test_keepalive_account_error_is_recorded_and_continues(isolated_db, monkeypa
     assert failed[0]["account_name"] == "甲"
     assert failed[0]["job"] == "keepalive"
     assert "fake-header-value" not in failed[0]["message"]
+
+
+def test_channel_budget_settings_persist_and_reload(isolated_db, monkeypatch):
+    import context_budget
+    monkeypatch.setattr(server, "_check_admin", lambda _authorization: None)
+    monkeypatch.setattr(context_budget, "_saved_channel_budgets", {})
+    monkeypatch.delenv("CB_PRETRIM_CHANNELS", raising=False)
+    budgets = {"workbuddy": 500, "workbuddy-i": 0, "qwenwork": 800}
+    asyncio.run(server.admin_update_settings(_settings_request({"context_channel_budgets": budgets, "loomy_context_budget": 900})))
+    assert db.get_setting("context_channel_budgets") == budgets
+    assert context_budget.channel_input_budget("workbuddy") == 500
+    assert context_budget.channel_input_budget("workbuddy-i") == 0
+    context_budget.set_saved_channel_budgets({})
+    context_budget.load_saved_channel_budgets()
+    assert context_budget.channel_input_budget("qwenwork") == 800
+    asyncio.run(server.admin_update_settings(_settings_request({"context_channel_budgets": {}})))
+    monkeypatch.delenv("CB_PRETRIM_BUDGET", raising=False)
+    assert context_budget.channel_input_budget("workbuddy") == 0
+
+
+@pytest.mark.parametrize("budgets", [[], {"unknown": 100}, {"loomy": 100}, {"workbuddy": -1}, {"workbuddy": 2000001}, {"workbuddy": 1.5}, {"workbuddy": True}])
+def test_channel_budget_settings_reject_invalid_values(isolated_db, monkeypatch, budgets):
+    monkeypatch.setattr(server, "_check_admin", lambda _authorization: None)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(server.admin_update_settings(_settings_request({"context_channel_budgets": budgets})))
+    assert exc.value.status_code == 400
+    assert db.get_setting("context_channel_budgets") is None
