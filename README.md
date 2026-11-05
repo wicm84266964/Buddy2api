@@ -18,7 +18,7 @@ Buddy2api 在本机提供 `http://127.0.0.1:8787/v1`。你在官方客户端里�
 
 Qoder 中国版读 `%APPDATA%\com.qodercn.app.stable\auth.v1.dat`，国际版读 `%APPDATA%\com.qoder.app.stable\auth.v1.dat`。两边的登录文件、模型目录和令牌不共用。额度在领取结果和官方余额里看。工具调用交回本机客户端。
 
-讯飞 Loomy 读本机 `auth-session.json`。每日额度由上游自动发放，一键领取只核对到账余额；长对话发送前按 16 万 token 预算裁旧历史。商汤小浣熊读本机 `auth.json`，一键领取会触发每日发放。新版客户端在 `%USERPROFILE%\.office-raccoon\agent\config\auth.json`，旧版 `%USERPROFILE%\.box-agent\config\auth.json` 仍会扫描。文件里没有用户编号时，按登录 token 的用户标识分开保存；换号后再导入不会覆盖已经导入的另一个号。官方客户端如果在退出时作废旧登录，已保存的号仍会失效，需要在那个号还登录着的时候导入。两家都用自己的请求头，不走 WorkBuddy 的 CLI 指纹。
+讯飞 Loomy 读本机 `auth-session.json`。每日额度由上游自动发放，一键领取只核对到账余额；长对话发送前按 16 万 token 预算裁旧历史。设置页「上下文预算」可通过下拉框分别配置各渠道，选择「全选」可批量应用预算；填 0 关闭发送前裁剪。除 Loomy 外各渠道默认关闭，保存后对后续请求生效。商汤小浣熊读本机 `auth.json`，一键领取会触发每日发放。新版客户端在 `%USERPROFILE%\.office-raccoon\agent\config\auth.json`，旧版 `%USERPROFILE%\.box-agent\config\auth.json` 仍会扫描。文件里没有用户编号时，按登录 token 的用户标识分开保存；换号后再导入不会覆盖已经导入的另一个号。官方客户端如果在退出时作废旧登录，已保存的号仍会失效，需要在那个号还登录着的时候导入。两家都用自己的请求头，不走 WorkBuddy 的 CLI 指纹。
 
 ```powershell
 python server.py

@@ -1507,8 +1507,12 @@ createApp({
   <div class="card card-p empty" v-else><div class="em">📋</div><p>暂无记录</p></div>
 </div>`
 }).component('stgs',{props:['token','toast','saveToken','ver','updating','checkVer','applyUpdate'],setup(p){
-  const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,base_url:'http://127.0.0.1:8787/v1',admin_auth:localMode?'本机自动授权':'Admin Token',data_file:'codebuddy_gateway.db'};
+  const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,context_channel_budgets:{},base_url:'http://127.0.0.1:8787/v1',admin_auth:localMode?'本机自动授权':'Admin Token',data_file:'codebuddy_gateway.db'};
   const s=ref({...defaults}),stats=ref(null),ld=ref(true),saving=ref(false),copied=ref(''),setupTab=ref('codex'),adminToken=ref(p.token||'');
+  const budgetChannels=[{id:'workbuddy',name:'WorkBuddy 国内版'},{id:'workbuddy-i',name:'WorkBuddy 国际版'},{id:'qwenwork',name:'千问办公'},{id:'qoder',name:'Qoder 中国版'},{id:'qoder-i',name:'Qoder 国际版'},{id:'traework',name:'TraeWork'},{id:'loomy',name:'Loomy'},{id:'xiaohuanxiong',name:'小浣熊'}];
+  const budgetChannel=ref('workbuddy'),batchBudget=ref(0);
+  const selectedBudget=computed({get(){if(budgetChannel.value==='*')return batchBudget.value;if(budgetChannel.value==='loomy')return s.value.loomy_context_budget;return s.value.context_channel_budgets?.[budgetChannel.value]??0},set(value){if(budgetChannel.value==='*'){batchBudget.value=value;return}if(budgetChannel.value==='loomy'){s.value.loomy_context_budget=value;return}s.value.context_channel_budgets={...s.value.context_channel_budgets,[budgetChannel.value]:value}}});
+  function applyBudgetToAll(){const value=Number(batchBudget.value);if(!Number.isInteger(value)||value<0||value>2000000){p.toast('预算须为 0 到 2000000 的整数','err');return}s.value.context_channel_budgets=Object.fromEntries(budgetChannels.filter(c=>c.id!=='loomy').map(c=>[c.id,value]));s.value.loomy_context_budget=value;p.toast('已应用到全部渠道，记得保存','info')}
   const keysList=ref([]),codexKeyInput=ref(''),codexStatus=ref(null),codexBusy=ref(false),codexResult=ref(null);
   const presets={
     codex:{name:'Codex (OpenAI)',base:'http://127.0.0.1:8787/v1',model:'auto',note:'Codex 强制使用 Responses API (wire_api="responses")。本网关已内置协议转换层，自动将 /v1/responses 映射到后端 Chat Completions。模型别名自动启用。'},
@@ -1520,8 +1524,8 @@ createApp({
     curl:{name:'curl',base:'http://127.0.0.1:8787/v1',model:'auto',note:'用于快速验证服务、Key 和模型映射是否正常。'},
   };
   const automationLogs=ref([]),automationLatest=ref([]),automationFilter=ref('failed'),automationLoading=ref(false);async function loadAutomation(){automationLoading.value=true;try{const r=await api.get('/admin/automation-logs?limit=200&failures_only='+(automationFilter.value==='failed'?1:0),p.token);automationLogs.value=r.items||[];automationLatest.value=r.latest||[]}catch(e){p.toast(apiErr(e,'自动化日志加载失败'),'err')}automationLoading.value=false}function automationTime(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}function automationText(x){return {source:{schedule:'定时',manual:'手动'}[x.source]||x.source||'-',job:{checkin:'领取',keepalive:'续期'}[x.job]||x.job||'-',outcome:{failed:'失败',error:'异常',claimed:'已领取',already:'今日已领',no_campaign:'无活动',refreshed:'已续期',skipped:'跳过',ok:'成功'}[x.outcome]||x.outcome||'-'}}function automationClass(x){if(x.outcome==='failed'||x.outcome==='error')return 'err';if(x.outcome==='skipped'||x.outcome==='no_campaign')return 'warn';return 'ok'}function latestText(job){const row=(automationLatest.value||[]).find(x=>x.job===job&&x.source==='schedule');if(!row)return '还没有定时记录';return automationTime(row.created_at)+' · '+row.total+' 个账号 · 失败 '+(row.failed||0)}async function load(){ld.value=true;try{const cfg=await api.get('/admin/settings',p.token);s.value={...defaults,...cfg};stats.value=await api.get('/admin/stats',p.token);keysList.value=await api.get('/admin/api-keys',p.token);if(keysList.value.length&&!codexKeyInput.value)codexKeyInput.value=keysList.value.find(k=>k.key)?.key||'';try{codexStatus.value=await api.get('/admin/codex/status',p.token)}catch(e){}}catch(e){p.toast(apiErr(e,'加载失败'),'err')}await loadAutomation();ld.value=false}
-  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',{backend_url:s.value.backend_url,default_domain:s.value.default_domain,timeout:Number(s.value.timeout)||300,keepalive_enabled:!!s.value.keepalive_enabled,keepalive_hour:Number(s.value.keepalive_hour),auto_checkin_enabled:!!s.value.auto_checkin_enabled,auto_checkin_hour:Number(s.value.auto_checkin_hour),loomy_context_budget:(s.value.loomy_context_budget===0||s.value.loomy_context_budget==='0')?0:(Number(s.value.loomy_context_budget)||160000)},p.token);p.toast('已保存，定时任务按新设置生效')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
-  function resetDefaults(){s.value={...s.value,backend_url:defaults.backend_url,default_domain:defaults.default_domain,timeout:defaults.timeout,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000};p.toast('已恢复默认，记得保存','info')}
+  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',{backend_url:s.value.backend_url,default_domain:s.value.default_domain,timeout:Number(s.value.timeout)||300,keepalive_enabled:!!s.value.keepalive_enabled,keepalive_hour:Number(s.value.keepalive_hour),auto_checkin_enabled:!!s.value.auto_checkin_enabled,auto_checkin_hour:Number(s.value.auto_checkin_hour),loomy_context_budget:Number(s.value.loomy_context_budget),context_channel_budgets:s.value.context_channel_budgets||{}},p.token);p.toast('已保存，后续请求按新设置生效')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
+  function resetDefaults(){s.value={...s.value,backend_url:defaults.backend_url,default_domain:defaults.default_domain,timeout:defaults.timeout,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,context_channel_budgets:{}};p.toast('已恢复默认，记得保存','info')}
   function saveAdminToken(){p.saveToken(adminToken.value)}
   function clearAdminToken(){adminToken.value='';p.saveToken('')}
   async function codexSetup(){
@@ -1551,7 +1555,7 @@ createApp({
     }
     const x=currentPreset.value;return `curl ${x.base}/chat/completions \\\n  -H "Authorization: Bearer YOUR_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${x.model}","messages":[{"role":"user","content":"hi"}]}'`
   }
-  onMounted(load);return{localMode,s,stats,ld,saving,copied,setupTab,adminToken,presets,currentPreset,envBlock,curlBlock,load,save,resetDefaults,saveAdminToken,clearAdminToken,copy,n,I,keysList,codexKeyInput,codexStatus,codexBusy,codexResult,codexSetup,automationLogs,automationFilter,automationLoading,loadAutomation,automationTime,automationText,automationClass,latestText}
+  onMounted(load);return{budgetChannels,budgetChannel,selectedBudget,applyBudgetToAll,localMode,s,stats,ld,saving,copied,setupTab,adminToken,presets,currentPreset,envBlock,curlBlock,load,save,resetDefaults,saveAdminToken,clearAdminToken,copy,n,I,keysList,codexKeyInput,codexStatus,codexBusy,codexResult,codexSetup,automationLogs,automationFilter,automationLoading,loadAutomation,automationTime,automationText,automationClass,latestText}
 },template:`
 <div>
   <div class="phead"><h1>设置</h1><p>运行配置、接入信息和本机维护</p></div>
@@ -1587,10 +1591,14 @@ createApp({
       <div class="card-p empty" v-else><p>{{automationFilter==='failed'?'最近没有失败记录':'暂无自动化日志'}}</p></div>
     </div>
     <div class="card">
-      <div class="card-h">上下文预算<span class="sub">只影响 Loomy 发送前裁剪</span></div>
+      <div class="card-h">上下文预算<span class="sub">按渠道配置发送前裁剪</span></div>
       <div class="card-p">
         <div class="form-grid">
-          <div class="field"><label>Loomy 上下文预算</label><input v-model.number="s.loomy_context_budget" type="number" min="0" max="2000000" placeholder="160000"/><div class="hint">只在发送前裁 Loomy 的旧对话，默认 160000 token。填 0 关闭发送前裁剪。上游拒绝上下文时仍会再裁一次。CB_LOOMY_CONTEXT_BUDGET 可覆盖。</div></div>
+          <div class="field"><label>选择渠道</label><select v-model="budgetChannel"><option value="*">全选（全部渠道）</option><option v-for="c in budgetChannels" :key="c.id" :value="c.id">{{c.name}}</option></select><div class="hint">单独设置各渠道，或全选后批量应用相同预算。</div></div>
+          <div class="field"><label>{{budgetChannel==='*'?'批量预算':'上下文预算'}}（token）</label><input v-model.number="selectedBudget" type="number" min="0" max="2000000" step="1" placeholder="0"/><button v-if="budgetChannel==='*'" class="btn s" style="margin-top:8px" @click="applyBudgetToAll">应用到全部渠道</button><div class="hint">填 0 关闭发送前裁剪。默认 Loomy 160000 token，其他渠道默认关闭。预算包含输出预留；超过预算会删除更早历史，不修改模型容量。上游拒绝上下文时仍会再裁一次。</div></div>
+        </div>
+        <div class="hint" style="margin-top:12px">修改后点击页面底部「保存设置」，对后续请求生效。环境变量优先：CB_PRETRIM_CHANNELS 覆盖对应渠道，CB_PRETRIM_BUDGET 只为未单独设置的渠道兜底；Loomy 由 CB_LOOMY_CONTEXT_BUDGET 覆盖。</div>
+        <div class="hint" v-for="c in budgetChannels" :key="c.id">{{c.name}}：{{c.id==='loomy'?(s.loomy_context_budget===0?'关闭':s.loomy_context_budget+' token'):(Object.prototype.hasOwnProperty.call(s.context_channel_budgets||{},c.id)?(s.context_channel_budgets[c.id]===0?'关闭':s.context_channel_budgets[c.id]+' token'):'默认关闭（可由环境变量启用）')}}
         </div>
       </div>
     </div>
