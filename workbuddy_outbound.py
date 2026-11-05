@@ -9,6 +9,8 @@ from __future__ import annotations
 import copy
 import os
 import re
+import time
+from datetime import datetime, timedelta, timezone
 
 _OFF = {"0", "off", "false", "none", "no"}
 
@@ -152,6 +154,76 @@ def account_rule(status: int, detail) -> tuple[str, int, dict, str] | None:
     if code in _ROTATE_CODES:
         return ("rotate", status or 429, _detail_of(detail), "upstream_http")
     return None
+
+
+# Upstream advertises the exact moment a quota window rolls over, e.g.
+#   您的使用量已超出频率限制，将在 2026-11-05 20:41:47 UTC+8 重置
+# Timestamps come back as wall-clock plus an explicit offset; when the offset is
+# missing we assume UTC+8 because this is a mainland-China service.
+_RESET_KEYWORDS = ("重置", "reset")
+_RESET_STAMP_RE = re.compile(
+    r"(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?"
+    r"\s*(?:UTC|GMT)?\s*([+-]\d{1,2}:?\d{2})?"
+)
+_DEFAULT_RESET_OFFSET = timedelta(hours=8)
+
+
+def quota_reset_seconds(detail, now: float | None = None) -> float | None:
+    """Seconds until the reset moment a quota envelope advertises.
+
+    Returns None when the detail carries no usable timestamp, so callers fall
+    back to plain exponential backoff.
+    """
+    text = _detail_text(detail)
+    if not text or not any(word in text.lower() for word in _RESET_KEYWORDS):
+        return None
+    match = _RESET_STAMP_RE.search(text)
+    if not match:
+        return None
+    year, month, day, hour, minute, second, offset = match.groups()
+    try:
+        moment = datetime(
+            int(year), int(month), int(day),
+            int(hour), int(minute), int(second or 0),
+            tzinfo=timezone(_parse_offset(offset)),
+        )
+    except ValueError:
+        return None
+    remaining = moment.timestamp() - (time.time() if now is None else now)
+    return remaining if remaining > 0 else None
+
+
+def _parse_offset(value: str | None) -> timedelta:
+    if not value:
+        return _DEFAULT_RESET_OFFSET
+    sign = -1 if value.startswith("-") else 1
+    digits = value[1:].replace(":", "")
+    if not digits.isdigit() or len(digits) > 4:
+        return _DEFAULT_RESET_OFFSET
+    number = int(digits)
+    return timedelta(hours=number // 100, minutes=number % 100) * sign
+
+
+def _detail_text(detail) -> str:
+    parts: list[str] = []
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key in ("msg", "message", "error_message"):
+                value = node.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+            for value in node.values():
+                if isinstance(value, (dict, list)):
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+        elif isinstance(node, str):
+            parts.append(node)
+
+    walk(detail)
+    return " ".join(parts)
 
 
 def _primary_code(detail) -> tuple[int | None, str]:
