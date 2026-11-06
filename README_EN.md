@@ -4,7 +4,7 @@
 
 > Local consumer AI clients → one OpenAI-compatible API for Codex, OpenCode, Cherry Studio, NextChat, and similar agents. Work Buddy / CodeBuddy, Qoder, QwenWork, TraeWork, iFlytek Loomy, and SenseTime Xiaohuanxiong are on by default; pick one in the UI dropdown. Each request stays on one channel. QClaw is retired; its credits moved to WorkBuddy.
 
-Release **2.2.18**. Default channels include WorkBuddy domestic and international, Qoder CN and international, QwenWork, TraeWork, Loomy, and Xiaohuanxiong. Channels without a stored login are omitted from the model list. Local use only, and only with accounts you personally own. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+Release **2.2.19**. Default channels include WorkBuddy domestic and international, Qoder CN and international, QwenWork, TraeWork, Loomy, and Xiaohuanxiong. Channels without a stored login are omitted from the model list. Local use only, and only with accounts you personally own. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
 
 **Your own accounts only. Do not use SMS-code platforms, bulk registration, or any batch method to farm credits.** Do not expose the gateway to other people, claim rewards for them, or resell quota.
 
@@ -45,6 +45,22 @@ Narrow with `CB_GATEWAY_PROVIDERS=workbuddy` if you only want one.
 4. **Run QwenWork with `python server.py` on Windows.** A Linux Docker container cannot decrypt its DPAPI files; the UI says so. WorkBuddy can stay on Docker.
 5. If the chat client is itself in Docker, Base URL is `http://host.docker.internal:8787/v1`.
 
+## Proactive rate limiting
+
+Open **Settings → Proactive rate limiting** and save. Limits are off by default. Start with a **5-second minimum interval** and **1 concurrent request per account**, then adjust to your workload.
+
+| Setting | Default | Range and behavior |
+|---|---|---|
+| Minimum start interval | 0 seconds | 0–600; 0 disables pacing, measured between upstream request starts |
+| Maximum concurrency per account | 0 | 0–100; 0 disables the cap; a stream holds its slot until completion or cancellation |
+| Maximum queue wait | 120 seconds | 1–600; FIFO per account; a timeout allows failover to other queued accounts |
+
+All channels, Chat Completions and Responses, streaming and non-streaming calls, internal retries, and account tests share these limits. Login, check-in, and billing do not consume chat slots. Saving updates live limits; setting both interval and concurrency to 0 disables limiting.
+
+When every candidate times out, HTTP requests return 429 with `local_rate_limit` for Chat and `rate_limit_exceeded` for Responses. An already-started SSE response ends with an error event. Each account allows at most 256 waiting requests; a full queue also returns a local rate-limit error without expiring the account. With cross-channel failover disabled, a local queue failure returns directly instead of walking other accounts.
+
+Counters are process-local and reset on restart; independent gateway processes do not share limits. Pacing cannot guarantee avoidance of upstream token, model, or cumulative-usage limits. Legacy `routing_account_rpm` diagnostics remain informational; these new settings enforce the actual limits.
+
 ## Install
 
 1. [Git](https://git-scm.com/downloads), [Miniconda](https://docs.conda.io/projects/miniconda/en/latest/) (Python 3.12), and sign into Work Buddy / CodeBuddy at least once.
@@ -64,13 +80,13 @@ python server.py
 
 3. Open http://127.0.0.1:8787 → Accounts → Detect → Import → Test → API Keys (automatic channel by default; pick one channel to pin the key) → point your client at `http://127.0.0.1:8787/v1`.
 
-Windows script: `.\start.bat`. Docker helper: `.\start-docker-win.ps1` (WorkBuddy mount; use native Python for QwenWork). That helper builds from the local checkout. The prebuilt image is `ghcr.io/wicm84266964/buddy2api:v2.2.18` (`linux/amd64` only).
+Windows script: `.\start.bat`. Docker helper: `.\start-docker-win.ps1` (WorkBuddy mount; use native Python for QwenWork). That helper builds from the local checkout. The prebuilt image is `ghcr.io/wicm84266964/buddy2api:v2.2.19` (`linux/amd64` only).
 
 Later starts: `conda activate buddy2api` then `python server.py` in the project directory.
 
 ## Docker
 
-The official image is published only to GHCR, not Docker Hub: `ghcr.io/wicm84266964/buddy2api:v2.2.18`. A stable release also moves `latest`; prereleases do not. Pin the version tag. The image is `linux/amd64` only.
+The official image is published only to GHCR, not Docker Hub: `ghcr.io/wicm84266964/buddy2api:v2.2.19`. A stable release also moves `latest`; prereleases do not. Pin the version tag. The image is `linux/amd64` only.
 
 The first push can create a private GitHub Packages container. The repository owner must change that package to public once before anonymous `docker pull` works.
 
@@ -89,13 +105,13 @@ docker compose up -d
 Without cloning:
 
 ```powershell
-docker pull ghcr.io/wicm84266964/buddy2api:v2.2.18
+docker pull ghcr.io/wicm84266964/buddy2api:v2.2.19
 docker run -d --name buddy2api --restart unless-stopped `
   -p 127.0.0.1:8787:8787 `
   -v buddy2api-data:/app/data `
   -e CB_GATEWAY_ADMIN_TOKEN="cb-admin-replace-with-a-long-random-value" `
   -e CB_DOCKER=1 `
-  ghcr.io/wicm84266964/buddy2api:v2.2.18
+  ghcr.io/wicm84266964/buddy2api:v2.2.19
 ```
 
 ## FAQ

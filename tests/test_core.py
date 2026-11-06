@@ -361,6 +361,11 @@ def _collect_chat_proxy_stream(
             if stream_error is not None:
                 raise stream_error
 
+        async def aiter_lines(self):
+            async for chunk in self.aiter_bytes():
+                for line in chunk.decode("utf-8").splitlines():
+                    yield line
+
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs):
             pass
@@ -3730,3 +3735,50 @@ def test_workbuddy_failover_reaches_fifth_account(isolated_db, monkeypatch, stre
     assert "fifth" in asyncio.run(run())
     assert calls["successes"] == [accounts[-1]["id"]]
     assert len(calls["picks"]) == 5
+
+
+@pytest.mark.parametrize("streaming", [True, False])
+def test_chat_proxy_ignores_empty_tool_identity_on_continuation(monkeypatch, streaming):
+    chunks = [
+        _chat_sse({"choices": [{"index": 0, "delta": {"tool_calls": [
+            {"index": i, "id": f"call_{i}", "type": "function",
+             "function": {"name": "shell", "arguments": ""}} for i in range(2)
+        ]}, "finish_reason": None}]}),
+        _chat_sse({"choices": [{"index": 0, "delta": {"tool_calls": [
+            {"index": i, "id": "", "type": "",
+             "function": {"name": "", "arguments": '{"command":"x"}'}} for i in range(2)
+        ]}, "finish_reason": None}]}),
+        _chat_sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}),
+        b"data: [DONE]\n\n",
+    ]
+    raw = _collect_chat_proxy_stream(chunks, monkeypatch)
+    payloads, done = _parse_chat_proxy_sse(raw)
+    assert done == 1
+    assert not any(p.get("error") for p in payloads)
+    calls = [tc for p in payloads for c in p.get("choices", [])
+             for tc in c.get("delta", {}).get("tool_calls", [])]
+    assert [tc["id"] for tc in calls if "id" in tc] == ["call_0", "call_1"]
+    assert all(tc.get("type") != "" for tc in calls)
+    if not streaming:
+        # The non-streaming collector consumes the same normalized SSE stream.
+        async def collect():
+            return await proxy._collect_stream(
+                "https://upstream.test", {}, {"model": "test-model"},
+                {"id": 1}, None, "test-model", time.time())
+        result = asyncio.run(collect())
+        assert result[0] == "json"
+        tool_calls = result[1]["choices"][0]["message"]["tool_calls"]
+        assert [tc["id"] for tc in tool_calls] == ["call_0", "call_1"]
+
+
+@pytest.mark.parametrize("bad_field", [{"id": 123}, {"type": "invalid"}])
+def test_chat_proxy_rejects_invalid_tool_identity(monkeypatch, bad_field):
+    raw = _collect_chat_proxy_stream([_chat_sse({"choices": [{
+        "index": 0, "delta": {"tool_calls": [{"index": 0,
+        "function": {"name": "shell", "arguments": "{}"}, **bad_field}]},
+        "finish_reason": "tool_calls"}]})], monkeypatch)
+    payloads, done = _parse_chat_proxy_sse(raw)
+    assert done == 1
+    errors = [p["error"] for p in payloads if p.get("error")]
+    assert len(errors) == 1
+    assert "invalid call" in errors[0]["message"]

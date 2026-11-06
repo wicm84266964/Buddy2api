@@ -43,7 +43,15 @@ _token_locks_guard = threading.Lock()
 _route_lock = threading.Lock()
 _sticky_account_id: dict[str, int] = {}
 _failure_lock = threading.Lock()
-_account_failures: dict[int, tuple[int, float]] = {}
+# aid -> (consecutive_failures, cooldown_until, last_failure_at) on a monotonic clock.
+_account_failures: dict[int, tuple[int, float, float]] = {}
+# Consecutive-failure counter decays so a stale streak cannot pin an account
+# that has been quiet for a long time to the maximum cooldown.
+_FAILURE_DECAY_SECONDS = 1800.0
+# A quota envelope (6004) advertises the exact reset moment, which can be hours
+# away. Honour it, but cap it: a mis-parsed timestamp must not strand an account
+# for the rest of the day, and the limit may turn out to be model-scoped.
+_QUOTA_HINT_MAX_SECONDS = 3600.0
 
 
 def _get_token_lock(aid: int) -> asyncio.Lock:
@@ -86,31 +94,67 @@ def request_timeout(default: int) -> int:
         return default
 
 
+def _now() -> float:
+    """Monotonic clock; tests patch this to move time without sleeping."""
+    return time.monotonic()
+
+
+def _failure_state(aid: int) -> tuple[int, float, float]:
+    """Read a failure entry, tolerating the legacy 2-tuple shape."""
+    raw = _account_failures.get(aid)
+    if not raw:
+        return 0, 0.0, 0.0
+    count = int(raw[0] or 0)
+    until = float(raw[1] or 0.0)
+    last = float(raw[2]) if len(raw) > 2 else until
+    return count, until, last
+
+
 def mark_account_success(aid: int):
     with _failure_lock:
         _account_failures.pop(aid, None)
 
 
-def mark_account_failure(aid: int, status_code: int = 0):
+def mark_account_failure(aid: int, status_code: int = 0, cooldown_hint: Optional[float] = None):
+    """Record a failure and back off exponentially.
+
+    ``cooldown_hint`` is the seconds-until-reset an upstream quota envelope
+    advertised (see ``workbuddy_outbound.quota_reset_seconds``). It is treated as
+    a floor on the cooldown so a quota-exhausted account is not retried every
+    30 seconds, and capped by ``_QUOTA_HINT_MAX_SECONDS``.
+    """
+    now = _now()
     with _failure_lock:
-        count, _ = _account_failures.get(aid, (0, 0.0))
+        count, _until, last = _failure_state(aid)
+        if count and now - last > _FAILURE_DECAY_SECONDS:
+            count = 0
         count += 1
         base = 30 if status_code in {401, 403, 429} else 5
-        cooldown = min(300, base * (2 ** min(count - 1, 4)))
-        _account_failures[aid] = (count, time.monotonic() + cooldown)
+        cooldown = min(300, base * (2 ** min(count - 1, 6)))
+        if cooldown_hint and cooldown_hint > 0:
+            cooldown = max(cooldown, min(float(cooldown_hint), _QUOTA_HINT_MAX_SECONDS))
+        # A concurrent in-flight request may fail after a quota hint was saved.
+        # Its shorter fallback must not bring that account back prematurely.
+        _account_failures[aid] = (count, max(_until, now + cooldown), now)
     if status_code in {401, 403}:
         db.update_account(aid, {"status": "expired"})
 
 
 def account_is_cooling_down(aid: int) -> bool:
+    now = _now()
     with _failure_lock:
-        failure = _account_failures.get(aid)
-        if not failure:
+        count, until, last = _failure_state(aid)
+        if not count:
             return False
-        if failure[1] <= time.monotonic():
+        if until > now:
+            return True
+        # Cooldown elapsed. Keep the counter, otherwise the next failure starts
+        # the backoff over at 30s and an account with a dead quota gets retried
+        # on a ~30s cycle for hours. Drop the entry once it has been quiet for
+        # the decay window.
+        if now - last > _FAILURE_DECAY_SECONDS:
             _account_failures.pop(aid, None)
-            return False
-        return True
+        return False
 
 
 # ============================================================

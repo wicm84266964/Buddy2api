@@ -4,7 +4,7 @@
 
 > 把本机已经登录的消费级 AI 客户端，接成 OpenAI 兼容接口，给 Codex、OpenCode、Cherry Studio、NextChat 等用。默认打开 Work Buddy / CodeBuddy、Qoder、千问办公（QwenWork）、TraeWork、讯飞 Loomy、商汤小浣熊；管理页下拉选其中一个。一次请求只走一个通道。QClaw 已停止运营，通道已下架，积分请改用 WorkBuddy。
 
-当前版本 **2.2.18**。默认通道含 WorkBuddy 国内/国际、Qoder 中国/国际、千问办公、TraeWork、Loomy、小浣熊。没有登录凭证的渠道不会出现在模型列表里。这个项目只供你本人持有的账号在本机使用。不要公开部署，也不要把登录凭据、API Key、数据库文件发给别人。
+当前版本 **2.2.19**。默认通道含 WorkBuddy 国内/国际、Qoder 中国/国际、千问办公、TraeWork、Loomy、小浣熊。没有登录凭证的渠道不会出现在模型列表里。这个项目只供你本人持有的账号在本机使用。不要公开部署，也不要把登录凭据、API Key、数据库文件发给别人。
 
 **仅限自己的账号。严禁使用接码平台、批量注册或任何批量方式薅羊毛。** 不要把网关公开给别人用，也不要代领或倒卖额度。
 
@@ -36,6 +36,22 @@ python server.py
 | 商汤小浣熊 | 开 | `%USERPROFILE%\.office-raccoon\agent\config\auth.json`，旧版仍读 `%USERPROFILE%\.box-agent\config\auth.json` |
 
 路径不对时可用 `CB_AUTH_DIR`、`CB_QODER_USER_DATA_DIR`、`CB_QODER_I_USER_DATA_DIR`、`CB_QWENWORK_AUTH_DIR`、`CB_TRAEWORK_AUTH_DIR`、`CB_LOOMY_AUTH_DIR`、`CB_XHX_AUTH_DIR` 指定。各通道的登录文件不要混在同一个目录。只要其中一家时，可设 `CB_GATEWAY_PROVIDERS=workbuddy` 收窄。
+
+## 主动限流
+
+在管理页「设置 → 主动限流」配置并保存。默认关闭，可先尝试每账号最小请求间隔 **5 秒**、最大并发 **1**，再按实际情况调整。
+
+| 设置 | 默认 | 范围与作用 |
+|---|---|---|
+| 最小请求间隔 | 0 秒 | 0–600 秒；0 关闭间隔限制，按两次上游调用的开始时间计算 |
+| 每账号最大并发 | 0 | 0–100；0 不限制，流式响应结束或取消才释放名额 |
+| 最长排队时间 | 120 秒 | 1–600 秒；按账号先进先出，排队超时尝试队列中的其他账号 |
+
+所有渠道的 Chat Completions 和 Responses、流式/非流式、内部重试和账号测试都受控。登录、签到、额度查询不占模型调用名额。设置保存后生效；间隔和并发都设为 0 即关闭。
+
+全部候选账号排队超时后，返回 HTTP 429，Chat 错误码为 `local_rate_limit`，Responses 使用 `rate_limit_exceeded`；已开始的 SSE 则以错误事件结束。每账号最多排队 256 个请求，队列满时同样返回本地限流错误，不将账号标成失效。关闭跨渠道故障转移时，本地排队失败直接返回错误，不再遍历其他账号。
+
+计数保存在当前网关进程内，重启后清空，独立网关进程不共享。降低速度不能保证不触发上游的 token、模型或累计用量限制。原有 `routing_account_rpm` 等诊断参数仍只用于统计，实际限流使用本节的新设置。
 
 ## 注意事项
 
@@ -104,7 +120,7 @@ python server.py
 
 ### Docker
 
-官方镜像只发到 GitHub Container Registry，不发 Docker Hub。地址是 `ghcr.io/wicm84266964/buddy2api`，目前只有 `linux/amd64`。正式版发版成功后会推送同名标签，例如 `ghcr.io/wicm84266964/buddy2api:v2.2.18`，并移动 `latest`。预发布不移动 `latest`。请固定版本标签，不要默认追踪 `latest`。
+官方镜像只发到 GitHub Container Registry，不发 Docker Hub。地址是 `ghcr.io/wicm84266964/buddy2api`，目前只有 `linux/amd64`。正式版发版成功后会推送同名标签，例如 `ghcr.io/wicm84266964/buddy2api:v2.2.19`，并移动 `latest`。预发布不移动 `latest`。请固定版本标签，不要默认追踪 `latest`。
 
 第一次推送后，GitHub Packages 里的包可能是私有的。仓库所有者需要在包设置里把它改成公开，匿名 `docker pull` 才可用。这一步只做一次。
 
@@ -123,13 +139,13 @@ docker compose up -d
 不克隆源码时：
 
 ```powershell
-docker pull ghcr.io/wicm84266964/buddy2api:v2.2.18
+docker pull ghcr.io/wicm84266964/buddy2api:v2.2.19
 docker run -d --name buddy2api --restart unless-stopped `
   -p 127.0.0.1:8787:8787 `
   -v buddy2api-data:/app/data `
   -e CB_GATEWAY_ADMIN_TOKEN="cb-admin-请换成足够长的随机值" `
   -e CB_DOCKER=1 `
-  ghcr.io/wicm84266964/buddy2api:v2.2.18
+  ghcr.io/wicm84266964/buddy2api:v2.2.19
 ```
 
 ### 其他启动方式

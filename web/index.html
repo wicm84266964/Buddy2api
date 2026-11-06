@@ -1507,7 +1507,7 @@ createApp({
   <div class="card card-p empty" v-else><div class="em">📋</div><p>暂无记录</p></div>
 </div>`
 }).component('stgs',{props:['token','toast','saveToken','ver','updating','checkVer','applyUpdate'],setup(p){
-  const defaults={backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,context_channel_budgets:{},base_url:'http://127.0.0.1:8787/v1',admin_auth:localMode?'本机自动授权':'Admin Token',data_file:'codebuddy_gateway.db'};
+  const defaults={rate_limit_interval_seconds:0,rate_limit_max_concurrent:0,rate_limit_queue_timeout_seconds:120,backend_url:'https://copilot.tencent.com',default_domain:'www.codebuddy.cn',timeout:300,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,context_channel_budgets:{},base_url:'http://127.0.0.1:8787/v1',admin_auth:localMode?'本机自动授权':'Admin Token',data_file:'codebuddy_gateway.db'};
   const s=ref({...defaults}),stats=ref(null),ld=ref(true),saving=ref(false),copied=ref(''),setupTab=ref('codex'),adminToken=ref(p.token||'');
   const budgetChannels=[{id:'workbuddy',name:'WorkBuddy 国内版'},{id:'workbuddy-i',name:'WorkBuddy 国际版'},{id:'qwenwork',name:'千问办公'},{id:'qoder',name:'Qoder 中国版'},{id:'qoder-i',name:'Qoder 国际版'},{id:'traework',name:'TraeWork'},{id:'loomy',name:'Loomy'},{id:'xiaohuanxiong',name:'小浣熊'}];
   const budgetChannel=ref('workbuddy'),batchBudget=ref(0);
@@ -1524,8 +1524,8 @@ createApp({
     curl:{name:'curl',base:'http://127.0.0.1:8787/v1',model:'auto',note:'用于快速验证服务、Key 和模型映射是否正常。'},
   };
   const automationLogs=ref([]),automationLatest=ref([]),automationFilter=ref('failed'),automationLoading=ref(false);async function loadAutomation(){automationLoading.value=true;try{const r=await api.get('/admin/automation-logs?limit=200&failures_only='+(automationFilter.value==='failed'?1:0),p.token);automationLogs.value=r.items||[];automationLatest.value=r.latest||[]}catch(e){p.toast(apiErr(e,'自动化日志加载失败'),'err')}automationLoading.value=false}function automationTime(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'-'}function automationText(x){return {source:{schedule:'定时',manual:'手动'}[x.source]||x.source||'-',job:{checkin:'领取',keepalive:'续期'}[x.job]||x.job||'-',outcome:{failed:'失败',error:'异常',claimed:'已领取',already:'今日已领',no_campaign:'无活动',refreshed:'已续期',skipped:'跳过',ok:'成功'}[x.outcome]||x.outcome||'-'}}function automationClass(x){if(x.outcome==='failed'||x.outcome==='error')return 'err';if(x.outcome==='skipped'||x.outcome==='no_campaign')return 'warn';return 'ok'}function latestText(job){const row=(automationLatest.value||[]).find(x=>x.job===job&&x.source==='schedule');if(!row)return '还没有定时记录';return automationTime(row.created_at)+' · '+row.total+' 个账号 · 失败 '+(row.failed||0)}async function load(){ld.value=true;try{const cfg=await api.get('/admin/settings',p.token);s.value={...defaults,...cfg};stats.value=await api.get('/admin/stats',p.token);keysList.value=await api.get('/admin/api-keys',p.token);if(keysList.value.length&&!codexKeyInput.value)codexKeyInput.value=keysList.value.find(k=>k.key)?.key||'';try{codexStatus.value=await api.get('/admin/codex/status',p.token)}catch(e){}}catch(e){p.toast(apiErr(e,'加载失败'),'err')}await loadAutomation();ld.value=false}
-  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',{backend_url:s.value.backend_url,default_domain:s.value.default_domain,timeout:Number(s.value.timeout)||300,keepalive_enabled:!!s.value.keepalive_enabled,keepalive_hour:Number(s.value.keepalive_hour),auto_checkin_enabled:!!s.value.auto_checkin_enabled,auto_checkin_hour:Number(s.value.auto_checkin_hour),loomy_context_budget:Number(s.value.loomy_context_budget),context_channel_budgets:s.value.context_channel_budgets||{}},p.token);p.toast('已保存，后续请求按新设置生效')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
-  function resetDefaults(){s.value={...s.value,backend_url:defaults.backend_url,default_domain:defaults.default_domain,timeout:defaults.timeout,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,context_channel_budgets:{}};p.toast('已恢复默认，记得保存','info')}
+  async function save(){if(saving.value)return;saving.value=true;try{await api.put('/admin/settings',{backend_url:s.value.backend_url,default_domain:s.value.default_domain,timeout:Number(s.value.timeout)||300,keepalive_enabled:!!s.value.keepalive_enabled,keepalive_hour:Number(s.value.keepalive_hour),auto_checkin_enabled:!!s.value.auto_checkin_enabled,auto_checkin_hour:Number(s.value.auto_checkin_hour),loomy_context_budget:Number(s.value.loomy_context_budget),context_channel_budgets:s.value.context_channel_budgets||{},rate_limit_interval_seconds:Number(s.value.rate_limit_interval_seconds),rate_limit_max_concurrent:Number(s.value.rate_limit_max_concurrent),rate_limit_queue_timeout_seconds:Number(s.value.rate_limit_queue_timeout_seconds)},p.token);p.toast('已保存，后续请求按新设置生效')}catch(e){p.toast(apiErr(e,'保存失败'),'err')}saving.value=false}
+  function resetDefaults(){s.value={...s.value,rate_limit_interval_seconds:0,rate_limit_max_concurrent:0,rate_limit_queue_timeout_seconds:120,backend_url:defaults.backend_url,default_domain:defaults.default_domain,timeout:defaults.timeout,keepalive_enabled:false,keepalive_hour:22,auto_checkin_enabled:false,auto_checkin_hour:9,loomy_context_budget:160000,context_channel_budgets:{}};p.toast('已恢复默认，记得保存','info')}
   function saveAdminToken(){p.saveToken(adminToken.value)}
   function clearAdminToken(){adminToken.value='';p.saveToken('')}
   async function codexSetup(){
@@ -1589,6 +1589,18 @@ createApp({
         <tr v-for="x in automationLogs" :key="x.id"><td class="mono">{{automationTime(x.created_at)}}</td><td>{{automationText(x).source}}</td><td>{{automationText(x).job}}</td><td><span class="tag">{{x.channel||'-'}}</span></td><td>{{x.account_name||'-'}}</td><td><span class="badge" :class="automationClass(x)">{{automationText(x).outcome}}</span></td><td>{{x.message||'-'}}</td></tr>
       </tbody></table></div>
       <div class="card-p empty" v-else><p>{{automationFilter==='failed'?'最近没有失败记录':'暂无自动化日志'}}</p></div>
+    </div>
+    <div class="card">
+      <div class="card-h">主动限流<span class="sub">按账号独立排队 · 默认关闭</span></div>
+      <div class="card-p">
+        <div class="callout" style="margin-bottom:12px">控制每个账号的模型请求速度，所有渠道、流式和非流式共用。可先尝试最小间隔 5 秒、最大并发 1，再根据使用情况调整；上游限额随模型和账号变化，降低速度不能保证不触限。</div>
+        <div class="form-grid">
+          <div class="field"><label>最小请求间隔（秒）</label><input v-model.number="s.rate_limit_interval_seconds" type="number" min="0" max="600" step="0.1"/><div class="hint">同账号两次请求开始的最小间隔，0 关闭。重试和账号测试也会排队。</div></div>
+          <div class="field"><label>每账号最大并发</label><input v-model.number="s.rate_limit_max_concurrent" type="number" min="0" max="100" step="1"/><div class="hint">0 不限制。流式请求直到上游响应结束或取消才释放名额。</div></div>
+          <div class="field"><label>最长排队时间（秒）</label><input v-model.number="s.rate_limit_queue_timeout_seconds" type="number" min="1" max="600" step="1"/><div class="hint">默认 120 秒。排队超时会尝试其他可用账号；全部繁忙时返回本地限流错误。</div></div>
+        </div>
+        <div class="hint" style="margin-top:12px">保存后生效。间隔和并发都设为 0 即关闭；只限制模型调用，不影响登录、签到和额度查询。多个独立网关进程分别计数。</div>
+      </div>
     </div>
     <div class="card">
       <div class="card-h">上下文预算<span class="sub">按渠道配置发送前裁剪</span></div>

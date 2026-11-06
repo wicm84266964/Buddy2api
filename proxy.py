@@ -18,6 +18,8 @@ from typing import AsyncGenerator, Optional
 
 import httpx
 
+import rate_limiter
+
 import database as db
 import auth_manager
 import workbuddy_outbound
@@ -159,7 +161,11 @@ def _apply_account_rule(account_id: int, status: int, detail):
     if action == "expire":
         auth_manager.mark_account_failure(account_id, 401)
     elif action == "rotate":
-        auth_manager.mark_account_failure(account_id, 429)
+        # A quota envelope (6004) tells us when the window rolls over; feeding
+        # that in stops the gateway from re-trying a drained account every 30s.
+        auth_manager.mark_account_failure(
+            account_id, 429, cooldown_hint=workbuddy_outbound.quota_reset_seconds(detail)
+        )
     return action, client_status, client_detail, failure
 
 
@@ -649,10 +655,16 @@ class _ChatStreamObserver:
                         self.parser_error = "The upstream tool call stream had an invalid index."
                         return None
                     call_id = tool_delta.get("id")
-                    if call_id is not None and (not isinstance(call_id, str) or not call_id):
+                    if call_id == "":
+                        tool_delta.pop("id", None)
+                        call_id = None
+                    if call_id is not None and not isinstance(call_id, str):
                         self.parser_error = "The upstream tool call stream had an invalid call id."
                         return None
                     call_type = tool_delta.get("type")
+                    if call_type == "":
+                        tool_delta.pop("type", None)
+                        call_type = None
                     if call_type is not None and call_type != "function":
                         self.parser_error = "The upstream tool call stream had an invalid call type."
                         return None
@@ -1242,7 +1254,7 @@ async def _stream_upstream(
                 write=30,
                 pool=10,
             )
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=timeout) as client:
                 async with client.stream("POST", url, headers=headers, json=body) as response:
                     if response.status_code != 200:
                         raw_error = await response.aread()
@@ -1525,7 +1537,7 @@ async def _collect_stream(
     seen_done = False
 
     try:
-        async with httpx.AsyncClient(timeout=auth_manager.request_timeout(300)) as c:
+        async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=auth_manager.request_timeout(300)) as c:
             async with c.stream("POST", url, headers=headers, json=body) as r:
                 if r.status_code != 200:
                     raw = await r.aread()

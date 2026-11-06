@@ -10,6 +10,8 @@ from typing import AsyncGenerator
 
 import httpx
 
+import rate_limiter
+
 import auth_manager
 import database as db
 import resource_sync
@@ -467,7 +469,7 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name) 
         while True:
             url, headers, encoded = _signed_request(account, channel, raw)
             try:
-                async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
+                async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
                     async with client.stream("POST", url, headers=headers, content=encoded) as response:
                         if response.status_code in {401, 403} and not refreshed:
                             refreshed = True
@@ -510,6 +512,8 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name) 
                         auth_manager.mark_account_success(account["id"])
                         _log(channel, api_key_info, account, shown, "stop", 200, "", started, text_len)
                         return
+            except rate_limiter.RateLimitError:
+                raise
             except Exception as exc:
                 last = str(exc)[:240]
                 break
@@ -566,7 +570,7 @@ async def test_chat(account: dict, model: str = "auto", prompt: str = "ping") ->
     )
     pieces: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
+        async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
             async with client.stream("POST", url, headers=headers, content=encoded) as response:
                 status = response.status_code
                 if status >= 400:

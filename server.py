@@ -15,6 +15,7 @@ import contextvars
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import secrets
 import socket
@@ -42,6 +43,7 @@ import responses
 import providers
 import router
 import routing
+import rate_limiter
 import control_plane
 import resource_sync
 from providers.protocol import KNOWN_CHANNEL_IDS, KNOWN_CHANNEL_SET
@@ -1318,7 +1320,7 @@ async def admin_automation_logs(
 @app.get("/admin/settings")
 async def admin_get_settings(authorization: str | None = Header(default=None)):
     _check_admin(authorization)
-    return db.get_all_settings()
+    return {**rate_limiter.DEFAULT_SETTINGS, **db.get_all_settings()}
 
 
 @app.put("/admin/settings")
@@ -1338,10 +1340,25 @@ async def admin_update_settings(
         "auto_checkin_hour",
         "loomy_context_budget",
         "context_channel_budgets",
+        *rate_limiter.DEFAULT_SETTINGS,
     }
     unknown = set(data) - allowed_settings
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unsupported settings: {', '.join(sorted(unknown))}")
+    for key, lower, upper in (
+        ("rate_limit_interval_seconds", 0, 600),
+        ("rate_limit_max_concurrent", 0, 100),
+        ("rate_limit_queue_timeout_seconds", 1, 600),
+    ):
+        if key not in data:
+            continue
+        value = data[key]
+        if type(value) not in (int, float) or not lower <= value <= upper or not math.isfinite(value):
+            raise HTTPException(status_code=400, detail=f"{key} must be a number between {lower} and {upper}")
+        if key == "rate_limit_max_concurrent":
+            if int(value) != value:
+                raise HTTPException(status_code=400, detail=f"{key} must be an integer")
+            data[key] = int(value)
     for flag in ("keepalive_enabled", "auto_checkin_enabled"):
         if flag in data:
             data[flag] = control_plane.as_bool(data[flag], False)
