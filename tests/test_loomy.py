@@ -308,3 +308,97 @@ def test_refresh_names_empty_transport_error_and_retries(isolated_db, monkeypatc
     with pytest.raises(token.LoomyAuthError) as caught:
         asyncio.run(token.refresh_account(db.get_account(account_id)))
     assert str(caught.value) == "Loomy 保活请求失败: ReadTimeout"
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_refresh_relogs_revoked_session_with_saved_password(isolated_db, monkeypatch, status):
+    from providers.loomy import token, store
+
+    info = store.upsert_account(store.session_to_account({
+        "session": "revoked", "userid": "user-1", "phone": "13800000000",
+        "password": "test-password",
+    }))
+    db.update_account(info["id"], {"expires_at": 9_999_999_999_999})
+    monkeypatch.setattr(token, "newest_local_session", lambda _: None)
+    calls = []
+
+    async def probe(session):
+        assert session == "revoked"
+        return token.httpx.Response(status)
+
+    async def login(loginid, password, identity):
+        calls.append(loginid)
+        assert password == "test-password"
+        return {"session": "fresh", "userid": "user-1", "phone": loginid}
+
+    monkeypatch.setattr(token, "_probe_session", probe)
+    monkeypatch.setattr(token, "login_by_password", login)
+    fresh = asyncio.run(token.refresh_account(db.get_account(info["id"])))
+    assert fresh["id"] == info["id"]
+    assert fresh["access_token"] == "fresh"
+    assert token.password_of(fresh) == "test-password"
+    assert "password" not in fresh["extra"]
+    assert calls == ["13800000000"]
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500])
+def test_refresh_does_not_login_without_credentials_or_on_server_error(isolated_db, monkeypatch, status):
+    from providers.loomy import token
+
+    account = {"uid": "user-1", "access_token": "session", "expires_at": 9_999_999_999_999}
+    monkeypatch.setattr(token, "newest_local_session", lambda _: None)
+
+    async def probe(_):
+        return token.httpx.Response(status)
+
+    async def login(*args):
+        pytest.fail("must not login without credentials or on non-auth errors")
+
+    monkeypatch.setattr(token, "_probe_session", probe)
+    monkeypatch.setattr(token, "login_by_password", login)
+    if status >= 429:
+        account["nickname"] = "fake-login"
+        monkeypatch.setattr(token, "password_of", lambda _: "fake-password")
+    with pytest.raises(token.LoomyAuthError) as exc:
+        asyncio.run(token.refresh_account(account))
+    assert ("登录已失效" if status in {401, 403} else f"HTTP {status}") in str(exc.value)
+
+
+def test_refresh_validates_newer_local_session(isolated_db, monkeypatch):
+    from providers.loomy import token, store
+
+    account = store.session_to_account({"session": "old", "userid": "user-1"})
+    account["expires_at"] = 8_888_888_888_888
+    info = store.upsert_account(account)
+    local = {**account, "access_token": "newer-but-revoked", "expires_at": 9_999_999_999_999}
+    monkeypatch.setattr(token, "newest_local_session", lambda _: local)
+
+    async def probe(session):
+        assert session == "newer-but-revoked"
+        return token.httpx.Response(401)
+
+    monkeypatch.setattr(token, "_probe_session", probe)
+    with pytest.raises(token.LoomyAuthError, match="登录已失效"):
+        asyncio.run(token.refresh_account(db.get_account(info["id"])))
+
+
+def test_refresh_failed_relogin_is_attempted_once(isolated_db, monkeypatch):
+    from providers.loomy import token
+
+    account = {"uid": "user-1", "nickname": "fake-login", "access_token": "revoked", "expires_at": 9_999_999_999_999}
+    monkeypatch.setattr(token, "newest_local_session", lambda _: None)
+    monkeypatch.setattr(token, "password_of", lambda _: "fake-password")
+    calls = []
+
+    async def probe(_):
+        return token.httpx.Response(401)
+
+    async def login(*args):
+        calls.append(True)
+        raise token.LoomyAuthError("invalid credentials")
+
+    monkeypatch.setattr(token, "_probe_session", probe)
+    monkeypatch.setattr(token, "login_by_password", login)
+    with pytest.raises(token.LoomyAuthError, match="invalid credentials"):
+        asyncio.run(token.refresh_account(account))
+    assert calls == [True]

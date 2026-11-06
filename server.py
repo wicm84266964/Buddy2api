@@ -30,8 +30,9 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
+from streaming import ClosingStreamingResponse
 
 import database as db
 import auth_manager
@@ -482,7 +483,7 @@ async def chat_completions(
     elif result[0] == "json":
         return JSONResponse(content=result[1])
     elif result[0] == "stream":
-        return StreamingResponse(
+        return ClosingStreamingResponse(
             result[1],
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -533,7 +534,7 @@ async def resp_responses(
     elif result[0] == "json":
         return JSONResponse(content=result[1])
     elif result[0] == "stream":
-        return StreamingResponse(
+        return ClosingStreamingResponse(
             result[1],
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
