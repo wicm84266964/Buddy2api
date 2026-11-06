@@ -653,10 +653,16 @@ class _ChatStreamObserver:
                         self.parser_error = "The upstream tool call stream had an invalid index."
                         return None
                     call_id = tool_delta.get("id")
-                    if call_id is not None and (not isinstance(call_id, str) or not call_id):
+                    if call_id == "":
+                        tool_delta.pop("id", None)
+                        call_id = None
+                    if call_id is not None and not isinstance(call_id, str):
                         self.parser_error = "The upstream tool call stream had an invalid call id."
                         return None
                     call_type = tool_delta.get("type")
+                    if call_type == "":
+                        tool_delta.pop("type", None)
+                        call_type = None
                     if call_type is not None and call_type != "function":
                         self.parser_error = "The upstream tool call stream had an invalid call type."
                         return None
