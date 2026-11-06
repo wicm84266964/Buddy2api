@@ -159,3 +159,41 @@ def test_rotate_without_a_timestamp_still_records_the_failure(monkeypatch):
     (args, kwargs), = seen
     assert args == (5, 429)
     assert kwargs["cooldown_hint"] is None
+
+
+@pytest.mark.parametrize("zone,offset", [
+    ("UTC+8", 8), ("UTC+0", 0), ("UTC-5", -5), ("GMT+05:30", 5.5),
+    ("+0530", 5.5), ("-03:30", -3.5), ("Z", 0), ("UTC", 0), ("GMT", 0),
+])
+def test_quota_reset_timezone_formats(zone, offset):
+    expected = datetime(2026, 11, 7, 12, tzinfo=timezone(timedelta(hours=offset))).timestamp()
+    assert workbuddy_outbound.quota_reset_seconds(
+        f"quota reset 2026-11-07 12:00:00 {zone}", now=expected - 60) == 60
+
+
+@pytest.mark.parametrize("zone", ["UTC+25", "UTC+08:99", "UTC+12345", "UTC+8:3"])
+def test_quota_reset_rejects_invalid_timezone(zone):
+    assert workbuddy_outbound.quota_reset_seconds(
+        f"quota reset 2099-11-07 12:00:00 {zone}", now=0) is None
+
+
+def test_concurrent_failure_cannot_shorten_existing_quota_cooldown(monkeypatch):
+    clock = [1000.0]
+    _freeze(monkeypatch, clock)
+    auth_manager.mark_account_failure(99, 429, cooldown_hint=900)
+    clock[0] += 1
+    auth_manager.mark_account_failure(99, 500)
+    assert auth_manager._account_failures[99][1] == 1900
+
+
+def test_server_error_backoff_can_reach_its_ceiling(monkeypatch):
+    clock = [1000.0]
+    _freeze(monkeypatch, clock)
+    steps = []
+    for _ in range(8):
+        auth_manager.mark_account_failure(98, 500)
+        delay = _cooldown_of(98, clock[0])
+        steps.append(delay)
+        clock[0] += delay + 0.1
+        assert not auth_manager.account_is_cooling_down(98)
+    assert steps == [5, 10, 20, 40, 80, 160, 300, 300]

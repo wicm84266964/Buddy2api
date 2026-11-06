@@ -163,7 +163,8 @@ def account_rule(status: int, detail) -> tuple[str, int, dict, str] | None:
 _RESET_KEYWORDS = ("重置", "reset")
 _RESET_STAMP_RE = re.compile(
     r"(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?"
-    r"\s*(?:UTC|GMT)?\s*([+-]\d{1,2}:?\d{2})?"
+    r"\s*(Z|(?:UTC|GMT)(?:\s*[+-][\d:]+)?|[+-][\d:]+)?",
+    re.IGNORECASE,
 )
 _DEFAULT_RESET_OFFSET = timedelta(hours=8)
 
@@ -196,12 +197,18 @@ def quota_reset_seconds(detail, now: float | None = None) -> float | None:
 def _parse_offset(value: str | None) -> timedelta:
     if not value:
         return _DEFAULT_RESET_OFFSET
-    sign = -1 if value.startswith("-") else 1
-    digits = value[1:].replace(":", "")
-    if not digits.isdigit() or len(digits) > 4:
-        return _DEFAULT_RESET_OFFSET
-    number = int(digits)
-    return timedelta(hours=number // 100, minutes=number % 100) * sign
+    value = re.sub(r"\s+", "", value).upper()
+    if value in {"Z", "UTC", "GMT"}:
+        return timedelta(0)
+    value = re.sub(r"^(?:UTC|GMT)", "", value)
+    match = re.fullmatch(r"([+-])(\d{1,2})(?::?(\d{2}))?", value)
+    if not match:
+        raise ValueError("Invalid reset timezone")
+    sign, hours, minutes = match.groups()
+    hours, minutes = int(hours), int(minutes or 0)
+    if hours > 23 or minutes > 59:
+        raise ValueError("Invalid reset timezone")
+    return timedelta(hours=hours, minutes=minutes) * (-1 if sign == "-" else 1)
 
 
 def _detail_text(detail) -> str:

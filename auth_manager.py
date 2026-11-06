@@ -130,10 +130,12 @@ def mark_account_failure(aid: int, status_code: int = 0, cooldown_hint: Optional
             count = 0
         count += 1
         base = 30 if status_code in {401, 403, 429} else 5
-        cooldown = min(300, base * (2 ** min(count - 1, 4)))
+        cooldown = min(300, base * (2 ** min(count - 1, 6)))
         if cooldown_hint and cooldown_hint > 0:
             cooldown = max(cooldown, min(float(cooldown_hint), _QUOTA_HINT_MAX_SECONDS))
-        _account_failures[aid] = (count, now + cooldown, now)
+        # A concurrent in-flight request may fail after a quota hint was saved.
+        # Its shorter fallback must not bring that account back prematurely.
+        _account_failures[aid] = (count, max(_until, now + cooldown), now)
     if status_code in {401, 403}:
         db.update_account(aid, {"status": "expired"})
 
