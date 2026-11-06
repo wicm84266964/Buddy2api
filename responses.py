@@ -15,6 +15,7 @@ from typing import AsyncGenerator, Optional
 
 import proxy
 from reasoning_controls import normalize_chat_reasoning
+from streaming import ClosingStream, close_stream
 
 
 _DEBUG_SECRET_KEYS = {
@@ -587,12 +588,20 @@ async def _iter_chat_sse_data(
         yield b"\n".join(data_lines).decode("utf-8")
 
 
-async def chat_stream_to_responses_stream(
+def chat_stream_to_responses_stream(
     chat_stream: AsyncGenerator[bytes | bytearray | str, None],
     model: str,
     resp_payload: Optional[dict] = None,
-) -> AsyncGenerator[str, None]:
+) -> ClosingStream:
     """Convert a Chat Completions SSE stream into Responses API events."""
+    data_stream = ClosingStream(_iter_chat_sse_data(chat_stream), upstream=chat_stream)
+    return ClosingStream(
+        _chat_stream_to_responses_stream(data_stream, model, resp_payload),
+        upstream=data_stream,
+    )
+
+
+async def _chat_stream_to_responses_stream(data_stream, model, resp_payload):
     resp_id = "resp_" + os.urandom(12).hex()
     created_at = int(time.time())
     response_model = model
@@ -705,11 +714,10 @@ async def chat_stream_to_responses_stream(
         state["closed"] = True
         return events
 
-    yield event("response.created", response=response_snapshot("in_progress"))
-    yield event("response.in_progress", response=response_snapshot("in_progress"))
-
     try:
-        async for data_str in _iter_chat_sse_data(chat_stream):
+        yield event("response.created", response=response_snapshot("in_progress"))
+        yield event("response.in_progress", response=response_snapshot("in_progress"))
+        async for data_str in data_stream:
             data_str = data_str.strip()
             if not data_str:
                 continue
@@ -972,6 +980,8 @@ async def chat_stream_to_responses_stream(
             "code": "upstream_stream_error",
             "message": f"The upstream SSE stream failed: {exc}",
         }
+    finally:
+        await close_stream(data_stream)
 
     terminal_status = "completed"
     incomplete_reason = None

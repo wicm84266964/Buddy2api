@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import nullcontext
 import json
 import os
 from typing import Optional
@@ -15,6 +16,7 @@ import database as db
 import providers
 import responses
 import routing
+from streaming import ClosingStream, close_stream
 from reasoning_controls import normalize_chat_reasoning
 from model_capacity import clamp_output_tokens
 from providers.protocol import (
@@ -448,7 +450,11 @@ def _rewrite_json_model(obj, original: str):
     return obj
 
 
-async def _rewrite_stream_model(stream, original: str):
+def _rewrite_stream_model(stream, original: str):
+    return ClosingStream(_rewrite_stream_model_chunks(stream, original), upstream=stream)
+
+
+async def _rewrite_stream_model_chunks(stream, original: str):
     async for chunk in stream:
         if not isinstance(chunk, (bytes, bytearray, str)):
             yield chunk
@@ -532,27 +538,25 @@ async def _stream_first_is_error(stream) -> tuple[bool, list, object]:
     return (is_error, [first], ait)
 
 
-async def _replay(first: list, rest, account: dict | None = None) -> object:
-    """Replay the peeked chunk, then the live stream.
+def _replay(first: list, rest, account: dict | None = None):
+    """Pin upstream operations without carrying a ContextVar token over yield."""
+    return ClosingStream(
+        _replay_chunks(first, rest, account),
+        on_close=lambda: _close_stream(rest, account),
+    )
 
-    ``account`` keeps the pinned hop alive for the whole stream: provider
-    generators are lazy, so their account picking runs on the first
-    __anext__ — outside the ``with`` that dispatched them.
-    """
-    if account is None:
-        for chunk in first:
-            yield chunk
-        async for chunk in rest:
-            yield chunk
-        return
-    with auth_manager.pinned_account(account):
-        try:
-            for chunk in first:
-                yield chunk
-            async for chunk in rest:
-                yield chunk
-        finally:
-            await _close_stream(rest, account)
+
+async def _replay_chunks(first, rest, account):
+    for chunk in first:
+        yield chunk
+    iterator = rest.__aiter__()
+    while True:
+        with auth_manager.pinned_account(account) if account is not None else nullcontext():
+            try:
+                chunk = await iterator.__anext__()
+            except StopAsyncIteration:
+                return
+        yield chunk
 
 
 def account_queue(name: str | None = None, api_key_info: dict | None = None
@@ -702,14 +706,9 @@ async def chat_after_name(
     return await _walk_account_queue(name, payload, api_key_info, queue)
 
 
-async def _close_stream(stream, account: dict) -> None:
-    close = getattr(stream, "aclose", None)
-    if close is not None:
-        try:
-            with auth_manager.pinned_account(account):
-                await close()
-        except Exception:
-            pass
+async def _close_stream(stream, account: dict | None = None) -> None:
+    with auth_manager.pinned_account(account) if account is not None else nullcontext():
+        await close_stream(stream)
 
 
 async def _walk_account_queue(name: str, payload: dict, api_key_info: dict | None,
@@ -744,6 +743,10 @@ async def _walk_account_queue(name: str, payload: dict, api_key_info: dict | Non
                 "error": {"message": str(exc)[:200] or "dispatch failed",
                           "type": "upstream_error", "code": "upstream_error",
                           "channel": channel}}))
+        except BaseException:
+            if stream is not None:
+                await _close_stream(stream, account)
+            raise
         kind = result[0]
         if kind == "json":
             auth_manager.note_dispatched_account(account)

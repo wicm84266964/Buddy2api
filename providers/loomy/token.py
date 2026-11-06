@@ -10,7 +10,7 @@ import httpx
 import credential_crypto
 import database as db
 from providers.loomy.account import LoomyAuthError, login_by_password, new_identity
-from providers.loomy.constants import MODEL_BASE, RENEW_WITHIN_SECONDS
+from providers.loomy.constants import MODEL_BASE, RENEW_WITHIN_SECONDS, SESSION_SECONDS
 from providers.loomy.headers import model_headers
 from providers.loomy.store import newest_local_session, upsert_account
 
@@ -74,6 +74,33 @@ async def _probe_session(session: str) -> httpx.Response:
     raise LoomyAuthError(f"Loomy 保活请求失败: {_transport_message(last or RuntimeError('unknown'))}")
 
 
+async def _login_account(account: dict, loginid: str, password: str) -> dict:
+    identity = extra_of(account).get("identity")
+    if not isinstance(identity, dict):
+        identity = new_identity()
+    got = await login_by_password(loginid, password, identity)
+    parsed = {
+        "name": got.get("phone") or loginid,
+        "nickname": got.get("phone") or loginid,
+        "uid": got.get("userid") or account.get("uid") or loginid,
+        "provider": "loomy",
+        "access_token": got["session"],
+        "expires_at": int(time.time() * 1000) + SESSION_SECONDS * 1000,
+        "status": "active",
+        "extra": {
+            **extra_of(account),
+            "phone": got.get("phone") or loginid,
+            "loginid": loginid,
+            "identity": identity,
+        },
+    }
+    info = upsert_account(parsed)
+    fresh = db.get_account(info["id"])
+    if not fresh:
+        raise LoomyAuthError("Loomy 重新登录成功，但无法读取已保存的账号")
+    return fresh
+
+
 async def refresh_account(account: dict) -> dict:
     uid = str(account.get("uid") or "")
     local = newest_local_session(uid)
@@ -82,40 +109,20 @@ async def refresh_account(account: dict) -> dict:
         info = upsert_account(local)
         fresh = db.get_account(info["id"])
         if fresh:
-            return fresh
+            # A newer file is only a candidate; it may already be revoked.
+            account = fresh
     loginid = str(extra_of(account).get("loginid") or extra_of(account).get("phone") or account.get("nickname") or "")
     password = password_of(account)
     if password and loginid and (is_near_expiry(account) or is_expired(account) or not account.get("access_token")):
-        identity = extra_of(account).get("identity")
-        if not isinstance(identity, dict):
-            identity = new_identity()
-        got = await login_by_password(loginid, password, identity)
-        parsed = {
-            "name": got.get("phone") or loginid,
-            "nickname": got.get("phone") or loginid,
-            "uid": got.get("userid") or uid or loginid,
-            "provider": "loomy",
-            "access_token": got["session"],
-            "expires_at": int(time.time() * 1000) + 14 * 24 * 3600 * 1000,
-            "status": "active",
-            "extra": {
-                **extra_of(account),
-                "phone": got.get("phone") or loginid,
-                "loginid": loginid,
-                "identity": identity,
-                "password_enc": extra_of(account).get("password_enc"),
-            },
-        }
-        info = upsert_account(parsed)
-        fresh = db.get_account(info["id"])
-        if fresh:
-            return fresh
+        return await _login_account(account, loginid, password)
     session = str(account.get("access_token") or "")
     if session and not is_expired(account):
         response = await _probe_session(session)
-        if response.status_code in {401, 403}:
-            raise LoomyAuthError("Loomy 登录已失效。重新导入客户端会话，或在会话 JSON 里带上账号密码后再保活")
-        if response.status_code >= 400:
-            raise LoomyAuthError(f"Loomy 保活失败: HTTP {response.status_code}")
-        return account
+        if response.status_code not in {401, 403}:
+            if response.status_code >= 400:
+                raise LoomyAuthError(f"Loomy 保活失败: HTTP {response.status_code}")
+            return account
+    # The server may revoke a session before its locally estimated expiry.
+    if password and loginid:
+        return await _login_account(account, loginid, password)
     raise LoomyAuthError("Loomy 登录已失效。重新导入客户端会话，或在会话 JSON 里带上账号密码后再保活")
