@@ -159,7 +159,11 @@ def _apply_account_rule(account_id: int, status: int, detail):
     if action == "expire":
         auth_manager.mark_account_failure(account_id, 401)
     elif action == "rotate":
-        auth_manager.mark_account_failure(account_id, 429)
+        # A quota envelope (6004) tells us when the window rolls over; feeding
+        # that in stops the gateway from re-trying a drained account every 30s.
+        auth_manager.mark_account_failure(
+            account_id, 429, cooldown_hint=workbuddy_outbound.quota_reset_seconds(detail)
+        )
     return action, client_status, client_detail, failure
 
 
