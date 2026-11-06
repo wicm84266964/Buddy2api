@@ -254,7 +254,7 @@ def test_settings_reject_invalid_limits_without_partial_writes(monkeypatch, key,
     assert writes == []
 
 
-def test_saved_settings_roundtrip(monkeypatch):
+def test_saved_settings_roundtrip(monkeypatch, real_rate_limit_settings):
     saved = {}
     monkeypatch.setattr(server, "_check_admin", lambda _: None)
     monkeypatch.setattr(db, "set_setting", lambda k, v: saved.update({k: v}))
@@ -265,7 +265,7 @@ def test_saved_settings_roundtrip(monkeypatch):
               "rate_limit_queue_timeout_seconds": 60}
     asyncio.run(server.admin_update_settings(Request(values)))
     assert asyncio.run(server.admin_get_settings()) == values
-    assert rate_limiter.settings() == values
+    assert real_rate_limit_settings() == values
 
 
 @pytest.mark.parametrize("streaming", [False, True])
@@ -330,6 +330,7 @@ def test_real_http_stream_cancel_releases_account_to_next_request(config, monkey
     monkeypatch.setattr(auth_manager, "pick_account_with_fallback", pick)
     monkeypatch.setattr(auth_manager, "get_valid_headers", headers)
     monkeypatch.setattr(auth_manager, "backend_url", lambda *a: "https://upstream.test")
+    monkeypatch.setattr(auth_manager, "request_timeout", lambda default: default)
     monkeypatch.setattr(auth_manager, "mark_account_success", lambda *a: None)
     monkeypatch.setattr(db, "list_accounts", lambda **kw: [account])
     monkeypatch.setattr(proxy, "_log_request", lambda *a, **kw: None)
@@ -371,7 +372,7 @@ def test_real_http_stream_cancel_releases_account_to_next_request(config, monkey
             return result[1]
 
         first = asyncio.create_task(call())
-        await first_started.wait()
+        await asyncio.wait_for(first_started.wait(), 2)
         second = asyncio.create_task(call())
         await asyncio.sleep(0)
         assert len(requests) == 1

@@ -40,3 +40,8 @@ Base: `origin/main` (v2.2.18). Original PR #138 author attribution is retained.
 5. Set both interval and concurrency to 0 and save to disable limits.
 
 Limits are process-local, reset on restart and cannot guarantee avoiding vendor token/model/cumulative quotas. Vendor services were not called for this verification. Cross-channel failover disabled: local queue errors return directly. No remote PR was merged or release published as part of this acceptance branch.
+
+
+## Release preparation follow-up
+
+Before v2.2.19 publication, a clean-database CI run exposed a test isolation dependency: transport unit tests read the developer database's limiter settings, and the HTTP cancellation test also read its timeout. Shared tests now use isolated default limiter settings; persistence tests explicitly call the real reader with a stub store. The cancellation test stubs the timeout and bounds its initial wait. The complete 790-test suite was re-run against a new nonexistent database path.

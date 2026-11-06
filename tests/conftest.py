@@ -27,7 +27,16 @@ def _clear() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_routing_state():
+def _reset_shared_routing_state(monkeypatch, real_rate_limit_settings):
+    # Transport/protocol unit tests must not read the developer's settings or
+    # require a database schema. Limiter tests opt into their own configuration.
+    monkeypatch.setattr(rate_limiter, "settings", lambda: dict(rate_limiter.DEFAULT_SETTINGS))
     _clear()
     yield
     _clear()
+
+
+@pytest.fixture
+def real_rate_limit_settings():
+    """Expose the real reader to settings persistence tests before isolation."""
+    return rate_limiter.settings
