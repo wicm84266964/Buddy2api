@@ -188,9 +188,9 @@ def quota_reset_seconds(detail, now: float | None = None) -> float | None:
             int(hour), int(minute), int(second or 0),
             tzinfo=timezone(_parse_offset(offset)),
         )
-    except ValueError:
+        remaining = moment.timestamp() - (time.time() if now is None else now)
+    except (ValueError, OverflowError, OSError):
         return None
-    remaining = moment.timestamp() - (time.time() if now is None else now)
     return remaining if remaining > 0 else None
 
 

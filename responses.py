@@ -393,6 +393,8 @@ def _response_error(error: Optional[dict]) -> Optional[dict]:
     if not error:
         return None
     code = str(error.get("code") or "server_error")
+    if code == "local_rate_limit" or error.get("type") == "rate_limit_error":
+        code = "rate_limit_exceeded"
     return {
         "code": code if code in _RESPONSE_ERROR_CODES else "server_error",
         "message": str(error.get("message") or "The upstream response failed."),
@@ -1095,6 +1097,12 @@ async def proxy_responses(
     result = await handler(chat_payload, api_key_info)
     
     if result[0] == "error":
+        status, detail = result[1]
+        if isinstance(detail, dict) and isinstance(detail.get("error"), dict):
+            if detail["error"].get("code") == "local_rate_limit":
+                return ("error", (status, {**detail, "error": {
+                    **detail["error"], "code": "rate_limit_exceeded",
+                }}))
         return result
     
     model = chat_payload.get("model", "auto")

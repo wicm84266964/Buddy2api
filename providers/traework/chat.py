@@ -10,8 +10,11 @@ from typing import AsyncGenerator
 
 import httpx
 
+import rate_limiter
+
 import auth_manager
 import database as db
+from streaming import ClosingStream, close_stream
 from providers.traework.constants import (
     AGENT_API,
     AGENT_ID,
@@ -376,7 +379,7 @@ async def _turn(account: dict, prompt: str, model: str, timeout: float = 90.0) -
     headers = auth_headers(account)
     session_url = f"{AGENT_API}{SESSIONS_PATH}"
     sid = ""
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=timeout) as client:
         created = await client.post(
             session_url,
             headers=headers,
@@ -553,12 +556,13 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
                     except TraeWorkChatError as exc:
                         yield _llm_chunk(name, text=str(exc)[:240])
                         finish = "stop"
+                    await close_stream(opened)
                     yield _llm_chunk(name, finish=finish, usage=usage)
                     yield b"data: [DONE]\n\n"
                     auth_manager.mark_account_success(int(current["id"]))
                     _log(api_key_info, current, name, True, finish, 200, "", started, usage)
 
-                return ("stream", _forward())
+                return ("stream", ClosingStream(_forward(), upstream=events))
             turn = await _collect_llm(account, payload, model)
             auth_manager.mark_account_success(account_id)
             _log(api_key_info, account, shown, False, turn["finish"], 200, "", t0, turn.get("usage"))

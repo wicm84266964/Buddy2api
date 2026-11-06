@@ -45,6 +45,22 @@ Narrow with `CB_GATEWAY_PROVIDERS=workbuddy` if you only want one.
 4. **Run QwenWork with `python server.py` on Windows.** A Linux Docker container cannot decrypt its DPAPI files; the UI says so. WorkBuddy can stay on Docker.
 5. If the chat client is itself in Docker, Base URL is `http://host.docker.internal:8787/v1`.
 
+## Proactive rate limiting
+
+Open **Settings → Proactive rate limiting** and save. Limits are off by default. Start with a **5-second minimum interval** and **1 concurrent request per account**, then adjust to your workload.
+
+| Setting | Default | Range and behavior |
+|---|---|---|
+| Minimum start interval | 0 seconds | 0–600; 0 disables pacing, measured between upstream request starts |
+| Maximum concurrency per account | 0 | 0–100; 0 disables the cap; a stream holds its slot until completion or cancellation |
+| Maximum queue wait | 120 seconds | 1–600; FIFO per account; a timeout allows failover to other queued accounts |
+
+All channels, Chat Completions and Responses, streaming and non-streaming calls, internal retries, and account tests share these limits. Login, check-in, and billing do not consume chat slots. Saving updates live limits; setting both interval and concurrency to 0 disables limiting.
+
+When every candidate times out, HTTP requests return 429 with `local_rate_limit` for Chat and `rate_limit_exceeded` for Responses. An already-started SSE response ends with an error event. Each account allows at most 256 waiting requests; a full queue also returns a local rate-limit error without expiring the account. With cross-channel failover disabled, a local queue failure returns directly instead of walking other accounts.
+
+Counters are process-local and reset on restart; independent gateway processes do not share limits. Pacing cannot guarantee avoidance of upstream token, model, or cumulative-usage limits. Legacy `routing_account_rpm` diagnostics remain informational; these new settings enforce the actual limits.
+
 ## Install
 
 1. [Git](https://git-scm.com/downloads), [Miniconda](https://docs.conda.io/projects/miniconda/en/latest/) (Python 3.12), and sign into Work Buddy / CodeBuddy at least once.

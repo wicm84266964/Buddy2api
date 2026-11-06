@@ -16,6 +16,7 @@ import database as db
 import providers
 import responses
 import routing
+import rate_limiter
 from streaming import ClosingStream, close_stream
 from reasoning_controls import normalize_chat_reasoning
 from model_capacity import clamp_output_tokens
@@ -760,6 +761,19 @@ async def _walk_account_queue(name: str, payload: dict, api_key_info: dict | Non
                     "error": {"message": f"account '{hop}' failed",
                               "type": "channel_unavailable", "code": "channel_unavailable",
                               "channel": channel}}))
+                # A local queue timeout is a 429, not an upstream outage. Keep
+                # its actionable detail if every candidate is busy.
+                for chunk in first:
+                    text = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+                    for line in text.splitlines():
+                        if line.startswith("data:"):
+                            try:
+                                detail = json.loads(line[5:])
+                            except (ValueError, TypeError):
+                                continue
+                            if isinstance(detail, dict) and isinstance(detail.get("error"), dict):
+                                if detail["error"].get("code") == "local_rate_limit":
+                                    last_error = ("error", (429, detail))
                 await _close_stream(rest, account)
                 continue
             auth_manager.note_dispatched_account(account)
@@ -786,7 +800,13 @@ async def _chat_after_bind_no_echo(
     info["_bind_channel"] = bound.channel
     from context_budget import dispatch_with_context_policy
 
-    return await dispatch_with_context_policy(provider, bound.channel, dispatch, info)
+    try:
+        result = await dispatch_with_context_policy(provider, bound.channel, dispatch, info)
+    except rate_limiter.RateLimitError as exc:
+        return ("error", (429, exc.payload()))
+    if result[0] == "stream":
+        return ("stream", rate_limiter.guard_stream(result[1]))
+    return result
 
 
 async def responses_after_name(

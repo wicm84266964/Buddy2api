@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from streaming import ClosingStream, close_stream
 
 DEFAULT_LOOMY_INPUT_BUDGET = 160_000
 OUTPUT_RESERVE = 8192
@@ -378,7 +379,14 @@ def _finalize(channel: str, result: tuple, trimmed: bool, prompt_tokens: int) ->
     return result
 
 
-async def _guard_stream(provider, channel, payload, info, stream, already_trimmed, prompt_tokens):
+def _guard_stream(provider, channel, payload, info, stream, already_trimmed, prompt_tokens):
+    return ClosingStream(
+        _guard_stream_chunks(provider, channel, payload, info, stream, already_trimmed, prompt_tokens),
+        upstream=stream,
+    )
+
+
+async def _guard_stream_chunks(provider, channel, payload, info, stream, already_trimmed, prompt_tokens):
     buffered = []
     text = ""
     async for chunk in stream:
@@ -394,9 +402,16 @@ async def _guard_stream(provider, channel, payload, info, stream, already_trimme
         if payloads and all("error" in item for item in payloads):
             detail = payloads[-1]
             if is_context_rejection(502, detail, prompt_tokens=prompt_tokens):
+                # Release the rejected response (and its concurrency slot)
+                # before opening the replacement request on the same account.
+                await close_stream(stream)
                 recovered = await _retry(provider, channel, payload, info, already_trimmed)
-                async for item in _yield_result(recovered):
-                    yield item
+                recovery_stream = _yield_result(recovered)
+                try:
+                    async for item in recovery_stream:
+                        yield item
+                finally:
+                    await close_stream(recovery_stream)
                 return
             if _detail_html(detail):
                 yield _error_sse(readable_error(channel, kind="html", trimmed=False, status=502)[1][1])
@@ -410,7 +425,11 @@ async def _guard_stream(provider, channel, payload, info, stream, already_trimme
         yield item
 
 
-async def _yield_result(result: tuple):
+def _yield_result(result: tuple):
+    return ClosingStream(_yield_result_chunks(result), upstream=result[1] if result[0] == "stream" else None)
+
+
+async def _yield_result_chunks(result: tuple):
     if result[0] == "stream":
         async for chunk in result[1]:
             yield chunk

@@ -10,6 +10,7 @@ import pytest
 
 import auth_manager
 import routing
+import rate_limiter
 
 
 def _clear() -> None:
@@ -17,6 +18,7 @@ def _clear() -> None:
         auth_manager._account_failures.clear()
     auth_manager._sticky_account_id.clear()
     routing.reset_rate_windows()
+    rate_limiter.reset()
     # ``chat_after_name`` notes the request's 放行 channels in a ContextVar and
     # deliberately never unsets it (a request task outlives the dispatch call).
     # Tests share one context, so clear it here or one test's exemption leaks

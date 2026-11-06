@@ -9,6 +9,8 @@ from typing import AsyncGenerator
 
 import httpx
 
+import rate_limiter
+
 import auth_manager
 import database as db
 from reasoning_controls import resolve_reasoning_control
@@ -424,7 +426,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
         try:
             url, headers, packed = _packed_request(account, raw, upstream_model)
             chunks: list[dict] = []
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=120.0) as client:
                 async with client.stream("POST", url, headers=headers, content=packed) as response:
                     if response.status_code >= 400:
                         text = (await response.aread()).decode("utf-8", errors="replace")[:400]
@@ -507,7 +509,7 @@ async def _stream(raw: str, request_id: str, upstream_model: str, api_key_info, 
         finish = "stop"
         try:
             url, headers, packed = _packed_request(account, raw, upstream_model)
-            async with httpx.AsyncClient(timeout=None) as client:
+            async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", url, headers=headers, content=packed) as response:
                     last_status = response.status_code
                     if response.status_code >= 400:
@@ -576,7 +578,7 @@ async def test_chat(account: dict, model: str = "qwork-advanced", prompt: str = 
     try:
         url, headers, packed = _packed_request(account, raw, upstream_model)
         chunks: list[dict] = []
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=45.0) as client:
             async with client.stream("POST", url, headers=headers, content=packed) as response:
                 status = response.status_code
                 if status >= 400:
