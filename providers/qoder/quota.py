@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 from providers.protocol import QuotaSnapshot
 from providers.qoder.constants import CLIENT_TYPE, COSY_VERSION, USAGE_PATH, region
 from providers.qoder.token import QoderAuthError, refresh_account
@@ -136,7 +138,7 @@ async def fetch_quota(account: dict) -> QuotaSnapshot:
     response = None
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+            async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0, trust_env=False) as client:
                 response = await client.get(url, headers=_headers(current))
         except Exception as exc:
             return QuotaSnapshot(

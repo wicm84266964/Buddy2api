@@ -11,6 +11,8 @@ from typing import AsyncIterator
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import rate_limiter
 
 from providers.traework.constants import (
@@ -358,7 +360,7 @@ async def iter_llm_events(account: dict, payload: dict, model: str) -> AsyncIter
     body = build_llm_body(payload, model)
     url = f"{AGENT_API}{LLM_CHAT_PATH}"
     timeout = httpx.Timeout(30.0, read=180.0)
-    async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+    async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout, trust_env=False) as client:
         async with client.stream("POST", url, headers=llm_headers(account), json=body) as response:
             if response.status_code >= 400:
                 raw = (await response.aread()).decode("utf-8", errors="replace")[:240]

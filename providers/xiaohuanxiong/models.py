@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import httpx
+
+from tls_context import TLS_CONTEXT
 from model_capacity import capacity_fields
 
 from providers.xiaohuanxiong.constants import LLM_BASE
@@ -77,7 +79,7 @@ async def fetch_supplier_models(account: dict) -> list[dict]:
     token = str(account.get("access_token") or "")
     if not token:
         raise RuntimeError("小浣熊账号没有 access_token")
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0) as client:
         response = await client.get(f"{LLM_BASE}/model_catalog", headers=client_headers(token))
     if response.status_code >= 400:
         raise RuntimeError(f"小浣熊模型目录 HTTP {response.status_code}")

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import httpx
+
+from tls_context import TLS_CONTEXT
 from model_capacity import capacity_fields
 
 from providers.qclaw.constants import (
@@ -95,7 +97,7 @@ async def post_cmd(
     body = json_lib.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     url = f"{JPRX_GATEWAY}/data/{cmd}/forward"
     headers = build_headers(account, body)
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout) as client:
         response = await client.post(url, headers=headers, content=body)
     new_token = response.headers.get("X-New-Token")
     try:

@@ -8,6 +8,8 @@ from typing import AsyncGenerator
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import rate_limiter
 
 import auth_manager
@@ -105,7 +107,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
         t0 = time.time()
         try:
             account = await _ready(account)
-            async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=120.0) as client:
+            async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=120.0) as client:
                 response = await client.post(
                     f"{MODEL_BASE}/chat/completions",
                     headers=model_headers(str(account.get("access_token") or "")),
@@ -171,7 +173,7 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
         started = False
         try:
             account = await _ready(account)
-            async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=None) as client:
+            async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=None) as client:
                 async with client.stream(
                     "POST",
                     f"{MODEL_BASE}/chat/completions",
@@ -217,7 +219,7 @@ async def test_chat(account: dict, model: str = "auto", prompt: str = "ping") ->
     _parsed, raw = _body(payload)
     try:
         ready = await _ready(account)
-        async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=45.0) as client:
+        async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=45.0) as client:
             response = await client.post(
                 f"{MODEL_BASE}/chat/completions",
                 headers=model_headers(str(ready.get("access_token") or "")),

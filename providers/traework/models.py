@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import httpx
+
+from tls_context import TLS_CONTEXT
 from model_capacity import capacity_fields
 
 from providers.traework.constants import AGENT_API, MODELS_PATH
@@ -83,7 +85,7 @@ def _rows_from_payload(payload) -> list:
 async def fetch_supplier_models(account: dict) -> list[dict]:
     headers = auth_headers(account)
     url = f"{AGENT_API}{MODELS_PATH}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
         # Without functions, the endpoint defaults to the legacy solo_coder
         # catalog. Work sessions use the current solo_work_remote catalog.
         response = await client.get(

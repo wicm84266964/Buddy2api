@@ -11,6 +11,8 @@ import time
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import database as db
 from providers.qoder.constants import (
     CAMPAIGNS_PATH,
@@ -246,7 +248,7 @@ async def _get_campaigns(account: dict) -> tuple[dict, int, dict]:
     last_payload: dict = {}
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+            async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0, trust_env=False) as client:
                 response = await client.get(url, headers=_headers(current))
         except Exception as exc:
             return current, 0, {"_error": str(exc)[:240]}
@@ -300,7 +302,7 @@ async def claim_checkin(account: dict) -> dict:
     info = region(str(current.get("provider") or "qoder"))
     claim_url = f"{info['openapi']}{CAMPAIGNS_PATH}/{campaign_id}/claim"
     try:
-        async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0, trust_env=False) as client:
             claim = await client.post(
                 claim_url,
                 headers={**_headers(current), "content-type": "application/json", "origin": info["openapi"]},

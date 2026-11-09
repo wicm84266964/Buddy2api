@@ -10,6 +10,8 @@ from typing import AsyncGenerator
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import rate_limiter
 
 import auth_manager
@@ -469,7 +471,7 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name) 
         while True:
             url, headers, encoded = _signed_request(account, channel, raw)
             try:
-                async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
+                async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=120.0, trust_env=False) as client:
                     async with client.stream("POST", url, headers=headers, content=encoded) as response:
                         if response.status_code in {401, 403} and not refreshed:
                             refreshed = True
@@ -570,7 +572,7 @@ async def test_chat(account: dict, model: str = "auto", prompt: str = "ping") ->
     )
     pieces: list[str] = []
     try:
-        async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=45.0, trust_env=False) as client:
+        async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=45.0, trust_env=False) as client:
             async with client.stream("POST", url, headers=headers, content=encoded) as response:
                 status = response.status_code
                 if status >= 400:

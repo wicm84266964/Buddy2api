@@ -6,6 +6,8 @@ import time
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import database as db
 from providers.qoder.constants import region
 from providers.qoder.store import write_refreshed_auth
@@ -48,7 +50,7 @@ async def refresh_account(account: dict) -> dict:
         raise QoderAuthError("Qoder 账号没有刷新凭证，请重新登录后再导入")
     url = f"{region(channel)['openapi']}{_refresh_path(refresh)}"
     try:
-        async with httpx.AsyncClient(timeout=20.0, trust_env=False) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0, trust_env=False) as client:
             response = await client.post(
                 url,
                 headers={"User-Agent": "qoder-local-proxy", "Content-Type": "application/json"},

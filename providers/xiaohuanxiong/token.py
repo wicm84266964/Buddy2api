@@ -9,6 +9,8 @@ from pathlib import Path
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import database as db
 from providers.xiaohuanxiong.constants import AUTH_BASE, POINTS_BASE, REFRESH_MARGIN_SECONDS
 from providers.xiaohuanxiong.headers import client_headers
@@ -83,7 +85,7 @@ async def probe_token(token: str) -> bool:
     if not token:
         return False
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
             response = await client.get(
                 f"{POINTS_BASE}/balance",
                 headers=client_headers(token),
@@ -123,7 +125,7 @@ async def refresh_account(account: dict) -> dict:
 async def _exchange(account: dict, refresh: str) -> dict:
     body = json.dumps({"refresh_token": refresh}, separators=(",", ":"))
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
             response = await client.post(
                 f"{AUTH_BASE}/refresh",
                 headers=client_headers(json_body=True),

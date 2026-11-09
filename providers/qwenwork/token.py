@@ -7,6 +7,8 @@ from pathlib import Path
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 from providers.qwenwork.constants import (
     CLAIM_APP_MODE,
     CLAIM_BUILD,
@@ -143,7 +145,7 @@ async def _refresh_once(account: dict) -> dict:
     # makes the gateway judge the access token first and can hide a usable refresh.
     headers = openapi_headers()
     body = {"refresh_token": refresh, "target": "c"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
         response = await client.post(f"{GATEWAY}{REFRESH_PATH}", headers=headers, json=body)
     if response.status_code >= 400:
         raise _response_error(response, account)

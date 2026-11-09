@@ -23,6 +23,8 @@ from typing import Optional
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import database as db
 import fingerprint
 import routing
@@ -614,7 +616,7 @@ async def refresh_token_result(account: dict) -> dict:
         headers = build_refresh_headers(current)
         url = f"{backend_url(current)}/v2/plugin/auth/token/refresh"
         try:
-            async with httpx.AsyncClient(timeout=request_timeout(15)) as client:
+            async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=request_timeout(15)) as client:
                 response = await client.post(url, headers=headers, json={})
             data = response.json()
             status_code = response.status_code
@@ -1000,7 +1002,7 @@ async def fetch_account_resources(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=request_timeout(25)) as c:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=request_timeout(25)) as c:
             r = await c.post(f"{backend_url(account)}/v2/billing/meter/get-user-resource", headers=headers, json={})
             data = r.json()
     except (httpx.HTTPError, ValueError) as e:
@@ -1122,7 +1124,7 @@ async def fetch_checkin_status(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=request_timeout(20)) as c:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=request_timeout(20)) as c:
             r = await c.post(f"{backend_url(account)}/v2/billing/meter/checkin-activity-status", headers=headers, json={})
     except httpx.HTTPError as e:
         return _checkin_failure(account, status_code=0,
@@ -1208,7 +1210,7 @@ async def claim_daily_checkin(account: dict) -> dict:
         )
 
     try:
-        async with httpx.AsyncClient(timeout=request_timeout(30)) as c:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=request_timeout(30)) as c:
             r = await c.post(f"{backend_url(account)}/v2/billing/meter/daily-checkin", headers=headers, json={})
     except httpx.HTTPError as e:
         return _checkin_result(account, ok=False, status_code=0,

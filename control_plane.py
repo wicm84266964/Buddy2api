@@ -363,6 +363,49 @@ async def _channel_accounts(channel: str, status: str = "active") -> list[dict]:
 
 
 _DASHBOARD_QUOTA_CACHE_SEC = 300
+_QUOTA_SNAPSHOT_TTL_SEC = 300
+_quota_snapshots: dict[tuple[str, int], tuple[float, object]] = {}
+
+
+def _snapshot_ok(snapshot) -> bool:
+    return bool(getattr(snapshot, "ok", None) if not isinstance(snapshot, dict) else snapshot.get("ok"))
+
+
+def _mark_snapshot_cached(snapshot) -> None:
+    if isinstance(snapshot, dict):
+        snapshot["_from_cache"] = True
+    else:
+        try:
+            snapshot._from_cache = True
+        except Exception:
+            pass
+
+
+def _snapshot_from_cache(snapshot) -> bool:
+    if isinstance(snapshot, dict):
+        return bool(snapshot.get("_from_cache"))
+    return bool(getattr(snapshot, "_from_cache", False))
+
+
+async def _fetch_quota_cached(channel: str, account: dict, fetch_quota, force: bool):
+    """Serve a channel's quota snapshot from a short TTL cache.
+
+    Opening the Dashboard used to hit every provider's quota API on every load
+    (only the workbuddy family had a freshness cache). Cache the measured
+    snapshot per channel+account; ``force`` (the page's refresh button) always
+    refetches, and failures are never cached so a flaky upstream retries on the
+    next look.
+    """
+    account_id = int(account.get("id") or 0)
+    if not force and account_id:
+        hit = _quota_snapshots.get((channel, account_id))
+        if hit is not None and time.time() - hit[0] < _QUOTA_SNAPSHOT_TTL_SEC:
+            _mark_snapshot_cached(hit[1])
+            return hit[1]
+    snapshot = await fetch_quota(account)
+    if account_id and _snapshot_ok(snapshot):
+        _quota_snapshots[(channel, account_id)] = (time.time(), snapshot)
+    return snapshot
 
 
 async def _summarize_workbuddy_credit(provider, accounts: list[dict], force: bool) -> tuple[dict, list]:
@@ -410,7 +453,7 @@ def _cache_quota_reading(account, remaining) -> None:
         pass
 
 
-async def _summarize_quota_channel(channel: str, provider, accounts: list[dict]) -> dict:
+async def _summarize_quota_channel(channel: str, provider, accounts: list[dict], force: bool = False) -> dict:
     fetch_quota = getattr(provider, "fetch_quota", None) if provider else None
     if fetch_quota is None:
         return {
@@ -428,7 +471,11 @@ async def _summarize_quota_channel(channel: str, provider, accounts: list[dict])
         for account in accounts
         if isinstance(account, dict) and account.get("id") not in (None, "")
     }
-    snapshots = await _gather_limited(accounts, fetch_quota, limit=2)
+    snapshots = await _gather_limited(
+        accounts,
+        lambda account: _fetch_quota_cached(channel, account, fetch_quota, force),
+        limit=2,
+    )
     remaining_values = []
     used_values = []
     limit_values = []
@@ -458,10 +505,11 @@ async def _summarize_quota_channel(channel: str, provider, accounts: list[dict])
         if ok:
             ok_count += 1
         value = getattr(snapshot, "remaining", None) if not isinstance(snapshot, dict) else snapshot.get("remaining")
-        if value is not None and unit == "credit" and ok and not snap_unsupported:
+        if value is not None and unit == "credit" and ok and not snap_unsupported and not _snapshot_from_cache(snapshot):
             # Let routing see what this dashboard just measured. Opening the
             # overview is often the only quota check that ever runs, and the
-            # gate reads nothing but the cache. Best effort by design.
+            # gate reads nothing but the cache. Best effort by design. A cache
+            # hit is not a measurement; re-stamping it would fake freshness.
             snap_account_id = (
                 getattr(snapshot, "account_id", None)
                 if not isinstance(snapshot, dict)
@@ -500,7 +548,7 @@ async def credit_summary(force: bool = False) -> dict:
         if _workbuddy_family(channel):
             row, resources = await _summarize_workbuddy_credit(provider, accounts, force)
             return row, resources
-        return await _summarize_quota_channel(channel, provider, accounts), []
+        return await _summarize_quota_channel(channel, provider, accounts, force), []
 
     gathered = await asyncio.gather(
         *(one_channel(channel) for channel in providers.enabled_provider_ids())

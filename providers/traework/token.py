@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import time
 import httpx
+
+from tls_context import TLS_CONTEXT
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -156,7 +158,7 @@ async def refresh_account(account: dict) -> dict:
         "IDEVersion": IDE_VERSION,
     }
     url = f"{_host(account)}{EXCHANGE_PATH}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
         response = await client.post(url, headers=oauth_headers(access), json=body)
     if response.status_code >= 400:
         raise _exchange_error(response)
