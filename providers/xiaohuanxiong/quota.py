@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 from providers.protocol import QuotaSnapshot
 from providers.xiaohuanxiong.constants import CHANNEL_ID, ORIGIN, POINTS_BASE
 from providers.xiaohuanxiong.headers import client_headers
@@ -108,7 +110,7 @@ def _row(
 
 
 async def _get(url: str, token: str) -> tuple[int, dict]:
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0) as client:
         response = await client.get(url, headers=client_headers(token))
     try:
         payload = response.json()

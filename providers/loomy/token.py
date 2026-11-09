@@ -7,6 +7,8 @@ import time
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import credential_crypto
 import database as db
 from providers.loomy.account import LoomyAuthError, login_by_password, new_identity
@@ -60,7 +62,7 @@ async def _probe_session(session: str) -> httpx.Response:
     last: Exception | None = None
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0) as client:
                 return await client.get(
                     f"{MODEL_BASE}/points/records?record_type=all&page_no=1&page_size=1",
                     headers=model_headers(session, purpose="chat.message"),

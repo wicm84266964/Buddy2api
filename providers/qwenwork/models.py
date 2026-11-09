@@ -6,6 +6,8 @@ import time
 import uuid
 
 import httpx
+
+from tls_context import TLS_CONTEXT
 from model_capacity import capacity_fields
 
 from providers.qwenwork import cosy
@@ -77,7 +79,7 @@ async def fetch_supplier_models(account: dict) -> list[dict]:
             request_id=request_id,
         )
     )
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
         response = await client.get(url, headers=headers)
     if response.status_code >= 400:
         raise QwenWorkAuthError(f"models HTTP {response.status_code}")

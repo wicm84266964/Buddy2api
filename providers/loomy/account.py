@@ -9,6 +9,8 @@ import uuid
 from typing import Any
 
 import httpx
+
+from tls_context import TLS_CONTEXT
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.serialization import load_der_public_key
 
@@ -64,7 +66,7 @@ async def _call(path: str, body: dict) -> dict:
     headers = build_headers(ACCESS_KEY_ID, ACCESS_KEY_SECRET, method="POST", path=path, body=text)
     url = f"{ACCOUNT_BASE}{path}"
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
             response = await client.post(url, headers=headers, content=text.encode("utf-8"))
     except httpx.HTTPError as exc:
         raise LoomyAuthError(f"account service unreachable: {exc}") from exc

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import database as db
 from providers.loomy.constants import CHANNEL_ID, MODEL_BASE
 from providers.loomy.headers import model_headers
@@ -64,7 +66,7 @@ async def _points(account: dict) -> tuple[int, dict]:
     if not session:
         raise LoomyAuthError("Loomy account has no session")
     url = f"{MODEL_BASE}/points/records?record_type=all&page_no=1&page_size=1"
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0) as client:
         response = await client.get(url, headers=model_headers(session, purpose="chat.message"))
     try:
         payload = response.json()

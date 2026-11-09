@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import auth_manager
 import fingerprint
 
@@ -123,7 +125,7 @@ async def _exchange(method: str, url: str, origin: str, bearer: str = "") -> tup
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     body = b"{}" if method == "POST" else None
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30) as client:
         response = await client.request(method, url, headers=headers, content=body)
     return response.status_code, _loads(response)
 

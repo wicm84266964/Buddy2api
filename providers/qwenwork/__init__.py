@@ -6,6 +6,8 @@ from typing import Optional
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import auth_manager
 import database as db
 from providers.protocol import ChannelId, QuotaSnapshot
@@ -187,7 +189,7 @@ async def _account_context(account: dict):
     if access:
         headers["Authorization"] = f"Bearer {access}"
     url = f"{GATEWAY}{ACCOUNT_CONTEXT_PATH}?include=user,plan,quota"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
         return await client.get(url, headers=headers)
 
 

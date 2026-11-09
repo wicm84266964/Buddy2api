@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 from version import VERSION
 
 ROOT = Path(__file__).resolve().parent
@@ -125,7 +127,7 @@ def restart_allowed() -> bool:
 
 async def _get(url: str) -> tuple[int, str]:
     headers = {"User-Agent": f"Buddy2api/{VERSION}", "Accept": "application/json, text/plain"}
-    async with httpx.AsyncClient(timeout=4.0, follow_redirects=True, headers=headers) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=4.0, follow_redirects=True, headers=headers) as client:
         response = await client.get(url)
         return response.status_code, response.text or ""
 

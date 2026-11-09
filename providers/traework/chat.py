@@ -10,6 +10,8 @@ from typing import AsyncGenerator
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import rate_limiter
 
 import auth_manager
@@ -379,7 +381,7 @@ async def _turn(account: dict, prompt: str, model: str, timeout: float = 90.0) -
     headers = auth_headers(account)
     session_url = f"{AGENT_API}{SESSIONS_PATH}"
     sid = ""
-    async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=timeout) as client:
+    async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout) as client:
         created = await client.post(
             session_url,
             headers=headers,

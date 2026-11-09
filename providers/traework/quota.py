@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 from providers.protocol import QuotaSnapshot
 from providers.traework.constants import (
     CHANNEL_ID,
@@ -183,7 +185,7 @@ async def _post_checked(
         refreshed = True
     url = f"{_host(current)}{path}"
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout) as client:
             response = await client.post(url, headers=auth_headers(current), json=body)
     except httpx.HTTPError as exc:
         return current, None, {}, str(exc)[:240]
@@ -195,7 +197,7 @@ async def _post_checked(
         return current, response, data, error
     url = f"{_host(current)}{path}"
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout) as client:
             response = await client.post(url, headers=auth_headers(current), json=body)
     except httpx.HTTPError as exc:
         return current, None, {}, str(exc)[:240]

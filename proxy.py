@@ -18,6 +18,8 @@ from typing import AsyncGenerator, Optional
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import rate_limiter
 
 import database as db
@@ -1254,7 +1256,7 @@ async def _stream_upstream(
                 write=30,
                 pool=10,
             )
-            async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=timeout) as client:
+            async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout) as client:
                 async with client.stream("POST", url, headers=headers, json=body) as response:
                     if response.status_code != 200:
                         raw_error = await response.aread()
@@ -1537,7 +1539,7 @@ async def _collect_stream(
     seen_done = False
 
     try:
-        async with rate_limiter.account_slot(account), httpx.AsyncClient(timeout=auth_manager.request_timeout(300)) as c:
+        async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=auth_manager.request_timeout(300)) as c:
             async with c.stream("POST", url, headers=headers, json=body) as r:
                 if r.status_code != 200:
                     raw = await r.aread()

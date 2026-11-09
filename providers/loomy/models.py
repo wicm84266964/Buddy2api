@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import httpx
+
+from tls_context import TLS_CONTEXT
 from model_capacity import capacity_fields
 
 from providers.loomy.constants import MODEL_BASE
@@ -62,7 +64,7 @@ async def fetch_supplier_models(account: dict) -> list[dict]:
     session = str(account.get("access_token") or "")
     if not session:
         raise RuntimeError("Loomy account has no session")
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0) as client:
         response = await client.get(f"{MODEL_BASE}/models", headers=model_headers(session, purpose="chat.message"))
     if response.status_code >= 400:
         raise RuntimeError(f"Loomy /models HTTP {response.status_code}")

@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from tls_context import TLS_CONTEXT
+
 import database as db
 from providers.qwenwork.constants import (
     CHANNEL_ID,
@@ -222,7 +224,7 @@ async def _get_wallets(account: dict) -> tuple[int, dict, str]:
     headers = _status_headers(str(account.get("access_token") or ""))
     url = f"{GATEWAY}{WALLETS_PATH}"
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0) as client:
             response = await client.get(url, headers=headers)
     except httpx.HTTPError as exc:
         return 0, {}, str(exc)[:240]
