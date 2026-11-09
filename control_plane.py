@@ -371,23 +371,7 @@ def _snapshot_ok(snapshot) -> bool:
     return bool(getattr(snapshot, "ok", None) if not isinstance(snapshot, dict) else snapshot.get("ok"))
 
 
-def _mark_snapshot_cached(snapshot) -> None:
-    if isinstance(snapshot, dict):
-        snapshot["_from_cache"] = True
-    else:
-        try:
-            snapshot._from_cache = True
-        except Exception:
-            pass
-
-
-def _snapshot_from_cache(snapshot) -> bool:
-    if isinstance(snapshot, dict):
-        return bool(snapshot.get("_from_cache"))
-    return bool(getattr(snapshot, "_from_cache", False))
-
-
-async def _fetch_quota_cached(channel: str, account: dict, fetch_quota, force: bool):
+async def _fetch_quota_cached(channel: str, account: dict, fetch_quota, force: bool) -> tuple[object, bool]:
     """Serve a channel's quota snapshot from a short TTL cache.
 
     Opening the Dashboard used to hit every provider's quota API on every load
@@ -400,12 +384,13 @@ async def _fetch_quota_cached(channel: str, account: dict, fetch_quota, force: b
     if not force and account_id:
         hit = _quota_snapshots.get((channel, account_id))
         if hit is not None and time.time() - hit[0] < _QUOTA_SNAPSHOT_TTL_SEC:
-            _mark_snapshot_cached(hit[1])
-            return hit[1]
+            # Cache provenance belongs to this call, not the shared snapshot.
+            # Another dashboard may still be processing the original reading.
+            return hit[1], True
     snapshot = await fetch_quota(account)
     if account_id and _snapshot_ok(snapshot):
         _quota_snapshots[(channel, account_id)] = (time.time(), snapshot)
-    return snapshot
+    return snapshot, False
 
 
 async def _summarize_workbuddy_credit(provider, accounts: list[dict], force: bool) -> tuple[dict, list]:
@@ -483,7 +468,7 @@ async def _summarize_quota_channel(channel: str, provider, accounts: list[dict],
     unsupported = False
     message = ""
     channel_unit = "unknown"
-    for snapshot in snapshots:
+    for snapshot, from_cache in snapshots:
         unit = str(
             (getattr(snapshot, "unit", None) if not isinstance(snapshot, dict) else snapshot.get("unit"))
             or "unknown"
@@ -505,7 +490,7 @@ async def _summarize_quota_channel(channel: str, provider, accounts: list[dict],
         if ok:
             ok_count += 1
         value = getattr(snapshot, "remaining", None) if not isinstance(snapshot, dict) else snapshot.get("remaining")
-        if value is not None and unit == "credit" and ok and not snap_unsupported and not _snapshot_from_cache(snapshot):
+        if value is not None and unit == "credit" and ok and not snap_unsupported and not from_cache:
             # Let routing see what this dashboard just measured. Opening the
             # overview is often the only quota check that ever runs, and the
             # gate reads nothing but the cache. Best effort by design. A cache

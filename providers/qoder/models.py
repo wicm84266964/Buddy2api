@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from tls_context import TLS_CONTEXT
+from tls_context import TLS_CONTEXT_NO_ENV
 
 from providers.qoder import cosy
 from providers.qoder.constants import inference_base, upstream_key
@@ -61,7 +61,7 @@ async def fetch_supplier_models(account: dict) -> list[dict]:
         machine_id=str(extra.get("machine_id") or ""),
     )
     try:
-        async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=20.0, trust_env=False) as client:
+        async with httpx.AsyncClient(verify=TLS_CONTEXT_NO_ENV, timeout=20.0, trust_env=False) as client:
             response = await client.get(url, headers=headers)
     except httpx.HTTPError as exc:
         raise QoderModelsError(str(exc)[:180]) from exc
