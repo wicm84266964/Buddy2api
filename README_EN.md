@@ -4,7 +4,7 @@
 
 > Local consumer AI clients → one OpenAI-compatible API for Codex, OpenCode, Cherry Studio, NextChat, and similar agents. Work Buddy / CodeBuddy, Qoder, QwenWork, TraeWork, iFlytek Loomy, and SenseTime Xiaohuanxiong are on by default; pick one in the UI dropdown. Each request stays on one channel. QClaw is retired; its credits moved to WorkBuddy.
 
-Release **2.2.19**. Default channels include WorkBuddy domestic and international, Qoder CN and international, QwenWork, TraeWork, Loomy, and Xiaohuanxiong. Channels without a stored login are omitted from the model list. Local use only, and only with accounts you personally own. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+Release **2.2.20**. Default channels include WorkBuddy domestic and international, Qoder CN and international, QwenWork, TraeWork, Loomy, and Xiaohuanxiong. Channels without a stored login are omitted from the model list. Local use only, and only with accounts you personally own. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
 
 **Your own accounts only. Do not use SMS-code platforms, bulk registration, or any batch method to farm credits.** Do not expose the gateway to other people, claim rewards for them, or resell quota.
 
@@ -80,13 +80,13 @@ python server.py
 
 3. Open http://127.0.0.1:8787 → Accounts → Detect → Import → Test → API Keys (automatic channel by default; pick one channel to pin the key) → point your client at `http://127.0.0.1:8787/v1`.
 
-Windows script: `.\start.bat`. Docker helper: `.\start-docker-win.ps1` (WorkBuddy mount; use native Python for QwenWork). That helper builds from the local checkout. The prebuilt image is `ghcr.io/wicm84266964/buddy2api:v2.2.19` (`linux/amd64` only).
+Windows script: `.\start.bat`. Docker helper: `.\start-docker-win.ps1` (WorkBuddy mount; use native Python for QwenWork). That helper builds from the local checkout. The prebuilt image is `ghcr.io/wicm84266964/buddy2api:v2.2.20` (`linux/amd64` only).
 
 Later starts: `conda activate buddy2api` then `python server.py` in the project directory.
 
 ## Docker
 
-The official image is published only to GHCR, not Docker Hub: `ghcr.io/wicm84266964/buddy2api:v2.2.19`. A stable release also moves `latest`; prereleases do not. Pin the version tag. The image is `linux/amd64` only.
+The official image is published only to GHCR, not Docker Hub: `ghcr.io/wicm84266964/buddy2api:v2.2.20`. A stable release also moves `latest`; prereleases do not. Pin the version tag. The image is `linux/amd64` only.
 
 The first push can create a private GitHub Packages container. The repository owner must change that package to public once before anonymous `docker pull` works.
 
@@ -105,13 +105,13 @@ docker compose up -d
 Without cloning:
 
 ```powershell
-docker pull ghcr.io/wicm84266964/buddy2api:v2.2.19
+docker pull ghcr.io/wicm84266964/buddy2api:v2.2.20
 docker run -d --name buddy2api --restart unless-stopped `
   -p 127.0.0.1:8787:8787 `
   -v buddy2api-data:/app/data `
   -e CB_GATEWAY_ADMIN_TOKEN="cb-admin-replace-with-a-long-random-value" `
   -e CB_DOCKER=1 `
-  ghcr.io/wicm84266964/buddy2api:v2.2.19
+  ghcr.io/wicm84266964/buddy2api:v2.2.20
 ```
 
 ## FAQ
