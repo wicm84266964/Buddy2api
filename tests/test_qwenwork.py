@@ -24,6 +24,90 @@ from providers.qwenwork.constants import COSY_VERSION, COSY_VERSION_FROZEN, RSA_
 from providers.qwenwork.store import parse_credentials, qwenwork_auth_dirs
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_chat_encoding_failure_preserves_original_error(monkeypatch, stream):
+    from providers.qwenwork import chat
+    from providers.qwenwork.encode import EncodeError
+
+    failures = []
+
+    async def pick(tried):
+        return {"id": 1}
+
+    def pack(*args):
+        raise EncodeError("test encoding failure")
+
+    monkeypatch.setattr(chat, "_pick", pick)
+    monkeypatch.setattr(chat, "_packed_request", pack)
+    monkeypatch.setattr(chat.auth_manager, "account_attempt_limit", lambda channel: 1)
+    monkeypatch.setattr(chat.auth_manager, "mark_account_failure", lambda *args: failures.append(args))
+    monkeypatch.setattr(chat, "_log", lambda *args, **kwargs: None)
+
+    async def run():
+        kind, result = await chat.chat_completions(
+            {"model": "qwork-advanced", "messages": [{"role": "user", "content": "ping"}], "stream": stream},
+            None,
+        )
+        if stream:
+            assert kind == "stream"
+            assert b"test encoding failure" in await anext(result)
+            await result.aclose()
+        else:
+            assert kind == "error"
+            assert result[0] == 503
+            assert result[1]["error"]["message"] == "test encoding failure"
+
+    asyncio.run(run())
+    assert failures == [(1, 503)]
+
+
+def test_stream_closes_after_upstream_error(monkeypatch):
+    from contextlib import asynccontextmanager
+    import httpx
+    from providers.qwenwork import chat
+
+    closed = []
+
+    async def pick(tried):
+        return {"id": 1}
+
+    @asynccontextmanager
+    async def slot(account):
+        yield
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            closed.append("client")
+
+        @asynccontextmanager
+        async def stream(self, *args, **kwargs):
+            try:
+                yield httpx.Response(400, content=b"upstream rejected request")
+            finally:
+                closed.append("response")
+
+    monkeypatch.setattr(chat, "_pick", pick)
+    monkeypatch.setattr(chat, "_packed_request", lambda *args: ("https://example.test", {}, "{}"))
+    monkeypatch.setattr(chat.auth_manager, "account_attempt_limit", lambda channel: 1)
+    monkeypatch.setattr(chat.auth_manager, "mark_account_failure", lambda *args: None)
+    monkeypatch.setattr(chat.rate_limiter, "account_slot", slot)
+    monkeypatch.setattr(chat.httpx, "AsyncClient", Client)
+
+    async def run():
+        result = chat._stream("{}", "test", "qwork-advanced", None, "qwork-advanced")
+        assert b"upstream rejected request" in await anext(result)
+        await result.aclose()
+
+    asyncio.run(run())
+    assert closed == ["response", "client"]
+
+
 @pytest.fixture()
 def isolated_db(tmp_path, monkeypatch):
     path = tmp_path / "gateway.db"

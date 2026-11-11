@@ -17,6 +17,7 @@ import auth_manager
 import database as db
 from reasoning_controls import resolve_reasoning_control
 from providers.qwenwork import cosy
+from providers.qwenwork.encode import EncodeError
 from providers.qwenwork.constants import (
     BUILD,
     BUSINESS_PRODUCT,
@@ -52,7 +53,7 @@ def chat_url() -> str:
 
 
 def _packed_request(account: dict, raw: str, model: str) -> tuple[str, dict[str, str], str]:
-    from providers.qwenwork.encode import EncodeError, prepare_infer
+    from providers.qwenwork.encode import prepare_infer
 
     uid, name, email, token = _ids(account)
     extra = account.get("extra") if isinstance(account.get("extra"), dict) else {}
