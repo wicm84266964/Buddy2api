@@ -335,7 +335,7 @@ def _texts_from_event(raw: str, *, include_reasoning: bool = True) -> list[str]:
     return texts
 
 
-def _log(channel, api_key_info, account, model_name, finish_reason, status_code, error_msg, started, text_len):
+def _log(channel, api_key_info, account, model_name, finish_reason, status_code, error_msg, started, text_len, *, stream=True):
     info = api_key_info if isinstance(api_key_info, dict) else {}
     try:
         db.record_request(
@@ -348,7 +348,7 @@ def _log(channel, api_key_info, account, model_name, finish_reason, status_code,
                 "model": model_name,
                 "resolved_model": (api_key_info.get("_resolved_model")
                                    if isinstance(api_key_info, dict) else None) or model_name,
-                "stream": 1,
+                "stream": 1 if stream else 0,
                 "prompt_tokens": 0,
                 "completion_tokens": max(1, text_len // 4) if text_len else 0,
                 "total_tokens": max(1, text_len // 4) if text_len else 0,
@@ -456,7 +456,7 @@ async def mark_quota_exhausted(channel: str, account: dict) -> None:
         pass
 
 
-async def _stream(channel: str, raw: str, model: str, api_key_info, model_name) -> AsyncGenerator[bytes, None]:
+async def _stream(channel: str, raw: str, model: str, api_key_info, model_name, *, client_stream=True) -> AsyncGenerator[bytes, None]:
     tried: set[int] = set()
     last = "没有可用的 Qoder 账号"
     shown = model_name or model
@@ -488,7 +488,7 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name) 
                             auth_manager.mark_account_failure(account["id"], response.status_code)
                             if response.status_code == 400 and is_quota_refusal(last):
                                 await mark_quota_exhausted(channel, account)
-                            _log(channel, api_key_info, account, shown, "error", response.status_code, last, started, 0)
+                            _log(channel, api_key_info, account, shown, "error", response.status_code, last, started, 0, stream=client_stream)
                             break
                         text_len = 0
                         failed = ""
@@ -507,12 +507,13 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name) 
                                 yield _openai_chunk(shown, tool_calls=calls)
                         if failed:
                             last = failed
-                            _log(channel, api_key_info, account, shown, "error", 400, failed, started, text_len)
+                            _log(channel, api_key_info, account, shown, "error", 400, failed, started, text_len, stream=client_stream)
                             break
                         yield _openai_chunk(shown, finish="tool_calls" if saw_tools else "stop")
                         yield b"data: [DONE]\n\n"
                         auth_manager.mark_account_success(account["id"])
-                        _log(channel, api_key_info, account, shown, "stop", 200, "", started, text_len)
+                        _log(channel, api_key_info, account, shown, "tool_calls" if saw_tools else "stop",
+                             200, "", started, text_len, stream=client_stream)
                         return
             except rate_limiter.RateLimitError:
                 raise
@@ -651,7 +652,7 @@ async def chat_completions(channel: str, payload: dict, api_key_info: dict | Non
     if isinstance(api_key_info, dict):
         log_model = api_key_info.get("_log_model")
     shown = log_model or payload.get("model") or model
-    stream = _stream(channel, raw, model, api_key_info, shown)
+    stream = _stream(channel, raw, model, api_key_info, shown, client_stream=bool(payload.get("stream")))
     if payload.get("stream"):
         return ("stream", stream)
     chunks = [chunk async for chunk in stream]

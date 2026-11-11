@@ -108,6 +108,9 @@ def _ready_git(args):
 
 
 def test_pull_connect_failure_explains_missing_proxy(monkeypatch, tmp_path):
+    def failed_archive(_latest):
+        raise OSError("blocked")
+    monkeypatch.setattr(self_update, "_apply_codeload", failed_archive)
     monkeypatch.setattr(self_update, "ROOT", tmp_path)
     (tmp_path / ".git").mkdir()
 
@@ -143,6 +146,9 @@ def test_pull_connect_failure_explains_missing_proxy(monkeypatch, tmp_path):
 
 
 def test_pull_connect_failure_says_when_proxy_was_used(monkeypatch, tmp_path):
+    def failed_archive(_latest):
+        raise OSError("blocked")
+    monkeypatch.setattr(self_update, "_apply_codeload", failed_archive)
     monkeypatch.setattr(self_update, "ROOT", tmp_path)
     (tmp_path / ".git").mkdir()
 

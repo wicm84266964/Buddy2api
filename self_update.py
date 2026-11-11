@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import hashlib
+import io
+import json
 import os
 import re
 import subprocess
 import sys
 import threading
 import time
+import tempfile
 import urllib.request
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 import httpx
@@ -32,8 +37,69 @@ VERSION_SOURCES = (
     ("github-raw", "https://raw.githubusercontent.com/{repo}/main/version.py", "file"),
     ("github-release", "https://api.github.com/repos/{repo}/releases/latest", "release"),
 )
+ARCHIVE_MAX_BYTES = 32 * 1024 * 1024
+
+
+async def _get_archive() -> bytes:
+    url = f"https://codeload.github.com/{repo()}/zip/refs/heads/main"
+    async with httpx.AsyncClient(verify=TLS_CONTEXT, timeout=30.0, follow_redirects=True) as client:
+        async with client.stream("GET", url, headers={"User-Agent": f"Buddy2api/{VERSION}"}) as response:
+            response.raise_for_status()
+            chunks = bytearray()
+            async for chunk in response.aiter_bytes():
+                chunks.extend(chunk)
+                if len(chunks) > ARCHIVE_MAX_BYTES:
+                    raise ValueError("codeload 源码包超过大小限制")
+            return bytes(chunks)
+
+
+def _archive_files(raw: bytes) -> dict[str, bytes]:
+    files = {}
+    case_names = set()
+    roots = set()
+    total = 0
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        for member in archive.infolist():
+            path = PurePosixPath(member.filename)
+            if (path.is_absolute() or ".." in path.parts or "\\" in member.orig_filename
+                    or any(":" in part for part in path.parts)):
+                raise ValueError("源码包包含不安全路径")
+            if not path.parts:
+                continue
+            roots.add(path.parts[0])
+            if member.is_dir():
+                continue
+            if len(path.parts) < 2 or (member.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError("源码包包含不支持的文件")
+            relative = PurePosixPath(*path.parts[1:]).as_posix()
+            if any(part.lower() == ".git" for part in path.parts[1:]):
+                raise ValueError("源码包不能覆盖 Git 元数据")
+            if _runtime_path(relative):
+                raise ValueError("源码包不能包含本地配置或运行数据")
+            if any(part.endswith((".", " ")) for part in path.parts):
+                raise ValueError("源码包包含不支持的文件名")
+            total += member.file_size
+            if total > ARCHIVE_MAX_BYTES * 4 or relative.casefold() in case_names:
+                raise ValueError("源码包大小或文件列表异常")
+            case_names.add(relative.casefold())
+            files[relative] = archive.read(member)
+    if len(roots) != 1 or not parse_version_file(files.get("version.py", b"").decode("utf-8")):
+        raise ValueError("源码包缺少有效 version.py")
+    if not {"server.py", "self_update.py", "requirements.txt"}.issubset(files):
+        raise ValueError("源码包缺少必要项目文件")
+    return files
+
+
+def _runtime_path(name: str) -> bool:
+    path = PurePosixPath(name.lower())
+    return (path.parts[0] in {"data", "logs", "secrets", "credentials", ".venv", "venv", "ant-code-uploads"}
+            or path.name == ".env" or (path.name.startswith(".env.") and path.name != ".env.example")
+            or path.suffix in {".db", ".sqlite", ".sqlite3", ".key", ".pem", ".token", ".secret"}
+            or path.name.endswith((".db-wal", ".db-shm")))
+
 
 _cache: dict = {"at": 0.0, "ttl": 0.0, "payload": None}
+_apply_lock = threading.Lock()
 
 
 def repo() -> str:
@@ -182,7 +248,11 @@ async def _fetch_latest() -> tuple[str | None, str | None]:
         if not parsed:
             continue
         return parsed, name
-    return None, None
+    try:
+        files = _archive_files(await _get_archive())
+        return parse_version_file(files["version.py"].decode("utf-8")), "github-codeload"
+    except Exception:
+        return None, None
 
 
 _PROXY_ENV_NAMES = ("https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "http_proxy", "HTTP_PROXY")
@@ -498,9 +568,149 @@ def _git_ready() -> str | None:
         for line in status.stdout.splitlines()
         if line.strip() and not line.startswith("??") and not line.startswith("!!")
     ]
-    if dirty:
+    if _archive_state_path().exists():
+        try:
+            _validate_archive_state()
+        except Exception as exc:
+            return str(exc)[:400]
+    elif dirty:
         return "工作区有未提交修改，请先手动处理"
     return None
+
+
+def _archive_state_path() -> Path:
+    return ROOT / ".git" / "buddy2api-codeload.json"
+
+
+def _git_output(args: list[str]) -> str:
+    result = _run(["git", *args], 15)
+    if result.returncode:
+        raise ValueError("无法验证 Git 状态：" + (result.stderr or result.stdout)[:200])
+    return result.stdout.strip()
+
+
+def _file_hash(path: Path) -> str | None:
+    if path.is_symlink():
+        raise ValueError(f"不能更新符号链接：{path.name}")
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def _validate_archive_state() -> dict:
+    state = json.loads(_archive_state_path().read_text(encoding="utf-8"))
+    if state["head"] != _git_output(["rev-parse", "HEAD"]):
+        raise ValueError("源码包更新后 Git HEAD 已变化，请先手动同步仓库")
+    for name, expected in state["files"].items():
+        target = _update_target(name)
+        if _file_hash(target) != expected:
+            raise ValueError(f"工作区有本地修改，请先手动处理：{name}")
+    changed = _git_output(["diff", "--name-only", "-z", "HEAD"]).split("\0")
+    if any(name and name not in state["files"] for name in changed):
+        raise ValueError("工作区有未提交修改，请先手动处理")
+    if _git_output(["diff", "--cached", "--name-only"]):
+        raise ValueError("暂存区有本地修改，请先手动处理")
+    return state
+
+
+def _update_target(name: str) -> Path:
+    path = PurePosixPath(name)
+    if (path.is_absolute() or ".." in path.parts or "\\" in name or not path.parts
+            or any(":" in part or part.lower() == ".git" for part in path.parts)):
+        raise ValueError("更新路径无效")
+    target = ROOT.joinpath(*path.parts)
+    if not target.resolve().is_relative_to(ROOT.resolve()):
+        raise ValueError("更新路径超出项目目录")
+    parent = target
+    while parent != ROOT:
+        if parent.is_symlink():
+            raise ValueError(f"更新路径包含符号链接：{name}")
+        parent = parent.parent
+    return target
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode if path.exists() else None
+    fd, temporary = tempfile.mkstemp(prefix=".buddy-update-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        if mode is not None:
+            os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _apply_codeload(latest: str) -> None:
+    # Archive updates leave Git history intact. A manifest distinguishes these
+    # known changes from user edits, so the next update can use the same route.
+    remote = _git_remote_url().rstrip("/")
+    match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([^/]+/[^/]+)", remote)
+    remote_repo = match.group(1).removesuffix(".git") if match else ""
+    if remote_repo.lower() != repo().lower():
+        raise ValueError("Git remote 与更新仓库不一致，不能使用 codeload 回退")
+    files = _archive_files(asyncio.run(_get_archive()))
+    version = parse_version_file(files["version.py"].decode("utf-8"))
+    if version != latest and not is_newer(version, latest):
+        raise ValueError("codeload 源码包版本落后于已检测版本")
+    blocked = _git_ready()
+    if blocked:
+        raise ValueError(blocked)
+    state_path = _archive_state_path()
+    previous = _validate_archive_state() if state_path.exists() else None
+    head = _git_output(["rev-parse", "HEAD"])
+    if not previous and _git_output(["rev-list", "--count", "@{upstream}..HEAD"]) != "0":
+        raise ValueError("当前分支有本地提交，不能使用源码包覆盖")
+    tracked = set(_git_output(["ls-files", "-z"]).split("\0")) - {""}
+    managed = {name for name in tracked | set(previous["files"] if previous else ()) if not _runtime_path(name)}
+    names = managed | set(files)
+    originals = {}
+    for name in names:
+        path = _update_target(name)
+        # Never replace a user's untracked/ignored file with a new upstream file.
+        if name not in managed and path.exists():
+            raise ValueError(f"源码包与本地文件冲突：{name}")
+        if path.exists() and not path.is_file():
+            raise ValueError(f"源码包与本地目录冲突：{name}")
+        originals[name] = path.read_bytes() if path.exists() else None
+    old_state = state_path.read_bytes() if previous else None
+    # Durable backup survives a process crash; runtime databases and secrets
+    # outside the source file list are never included or changed.
+    backup_dir = Path(tempfile.mkdtemp(prefix="buddy2api-update-", dir=ROOT / ".git"))
+    with zipfile.ZipFile(backup_dir / "before.zip", "w", zipfile.ZIP_DEFLATED) as backup:
+        for name, data in originals.items():
+            if data is not None:
+                backup.writestr(name, data)
+    (backup_dir / "manifest.json").write_text(json.dumps({
+        "head": head, "absent": [name for name, data in originals.items() if data is None],
+        "previous_state": previous,
+    }), encoding="utf-8")
+    touched = []
+    try:
+        for name in sorted(names):
+            path = _update_target(name)
+            touched.append(name)
+            if name in files:
+                _atomic_write(path, files[name])
+            elif path.exists():
+                path.unlink()
+        state = {"head": head, "version": version, "backup": str(backup_dir),
+                 "files": {name: hashlib.sha256(files[name]).hexdigest() if name in files else None
+                           for name in names}}
+        _atomic_write(state_path, json.dumps(state, ensure_ascii=False).encode("utf-8"))
+    except Exception:
+        for name in reversed(touched):
+            path = _update_target(name)
+            if originals[name] is not None:
+                _atomic_write(path, originals[name])
+            elif path.exists():
+                path.unlink()
+        if old_state is not None:
+            _atomic_write(state_path, old_state)
+        elif state_path.exists():
+            state_path.unlink()
+        raise
 
 
 def _local_version() -> str:
@@ -512,6 +722,15 @@ def _local_version() -> str:
 
 
 def apply() -> dict:
+    if not _apply_lock.acquire(blocking=False):
+        return {"ok": False, "restart": False, "message": "更新正在进行中，请稍后再试"}
+    try:
+        return _apply()
+    finally:
+        _apply_lock.release()
+
+
+def _apply() -> dict:
     snapshot = asyncio.run(check(force=True))
     if not snapshot.get("update_available"):
         if not snapshot.get("checked"):
@@ -546,15 +765,29 @@ def apply() -> dict:
             "latest": snapshot.get("latest"),
             "message": blocked,
         }
-    try:
-        pull = _run(["git", "pull", "--ff-only"], 90)
-    except FileNotFoundError:
-        return {"ok": False, "restart": False, "message": "未找到 git，无法一键更新"}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "restart": False, "message": "git pull 超时"}
-    if pull.returncode != 0:
-        detail = (pull.stderr or pull.stdout or "git pull 失败").strip()
-        return {"ok": False, "restart": False, "message": _pull_failure_message(detail)}
+    archive_update = _archive_state_path().exists()
+    detail = ""
+    if not archive_update:
+        try:
+            pull = _run(["git", "pull", "--ff-only"], 90)
+        except FileNotFoundError:
+            return {"ok": False, "restart": False, "message": "未找到 git，无法一键更新"}
+        except subprocess.TimeoutExpired:
+            detail = "git pull 超时"
+            archive_update = True
+        else:
+            if pull.returncode != 0:
+                detail = (pull.stderr or pull.stdout or "git pull 失败").strip()
+                if not _looks_like_connect_failure(detail):
+                    return {"ok": False, "restart": False, "message": detail[:400]}
+                archive_update = True
+    if archive_update:
+        try:
+            _apply_codeload(snapshot["latest"])
+        except Exception as exc:
+            prefix = _pull_failure_message(detail) + " " if detail else ""
+            return {"ok": False, "restart": False,
+                    "message": f"{prefix}codeload 回退失败：{exc}"[:700]}
     new_version = _local_version()
     if not is_newer(new_version, snapshot["current"]) and new_version == snapshot["current"]:
         return {
@@ -591,7 +824,8 @@ def apply() -> dict:
         "restart": True,
         "current": snapshot["current"],
         "latest": new_version,
-        "message": f"已更新到 v{new_version}，正在重启",
+        "source": "github-codeload" if archive_update else "git",
+        "message": f"已{'通过 codeload ' if archive_update else ''}更新到 v{new_version}，正在重启",
     }
 
 

@@ -284,12 +284,18 @@ def _status_row(
 
 
 async def _pick_account(provider) -> dict | None:
+    import routing
+
     if provider is None:
         return None
     picker = getattr(provider, "pick_account_with_fallback", None)
     if picker is None:
         return None
-    return await picker()
+    # Reading a supplier catalog does not spend chat quota. Keep the provider's
+    # authentication/refresh and disabled-account checks, but allow a zero
+    # balance to fetch metadata. The exemption must not leak to later chats.
+    with routing.quota_exempt_scope((provider.id,)):
+        return await picker()
 
 
 async def _fetch_qclaw(account: dict) -> list[dict]:

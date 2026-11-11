@@ -4,7 +4,7 @@
 
 > Local consumer AI clients → one OpenAI-compatible API for Codex, OpenCode, Cherry Studio, NextChat, and similar agents. Work Buddy / CodeBuddy, Qoder, QwenWork, TraeWork, iFlytek Loomy, and SenseTime Xiaohuanxiong are on by default; pick one in the UI dropdown. Each request stays on one channel. QClaw is retired; its credits moved to WorkBuddy.
 
-Release **2.2.21**. Default channels include WorkBuddy domestic and international, Qoder CN and international, QwenWork, TraeWork, Loomy, and Xiaohuanxiong. Channels without a stored login are omitted from the model list. Local use only, and only with accounts you personally own. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
+Release **2.2.22**. Default channels include WorkBuddy domestic and international, Qoder CN and international, QwenWork, TraeWork, Loomy, and Xiaohuanxiong. Channels without a stored login are omitted from the model list. Local use only, and only with accounts you personally own. Do not expose this on the public internet, and do not share credentials, API keys, or the database.
 
 **Your own accounts only. Do not use SMS-code platforms, bulk registration, or any batch method to farm credits.** Do not expose the gateway to other people, claim rewards for them, or resell quota.
 
@@ -80,13 +80,13 @@ python server.py
 
 3. Open http://127.0.0.1:8787 → Accounts → Detect → Import → Test → API Keys (automatic channel by default; pick one channel to pin the key) → point your client at `http://127.0.0.1:8787/v1`.
 
-Windows script: `.\start.bat`. Docker helper: `.\start-docker-win.ps1` (WorkBuddy mount; use native Python for QwenWork). That helper builds from the local checkout. The prebuilt image is `ghcr.io/wicm84266964/buddy2api:v2.2.21` (`linux/amd64` only).
+Windows script: `.\start.bat`. Docker helper: `.\start-docker-win.ps1` (WorkBuddy mount; use native Python for QwenWork). That helper builds from the local checkout. The prebuilt image is `ghcr.io/wicm84266964/buddy2api:v2.2.22` (`linux/amd64` only).
 
 Later starts: `conda activate buddy2api` then `python server.py` in the project directory.
 
 ## Docker
 
-The official image is published only to GHCR, not Docker Hub: `ghcr.io/wicm84266964/buddy2api:v2.2.21`. A stable release also moves `latest`; prereleases do not. Pin the version tag. The image is `linux/amd64` only.
+The official image is published only to GHCR, not Docker Hub: `ghcr.io/wicm84266964/buddy2api:v2.2.22`. A stable release also moves `latest`; prereleases do not. Pin the version tag. The image is `linux/amd64` only.
 
 The first push can create a private GitHub Packages container. The repository owner must change that package to public once before anonymous `docker pull` works.
 
@@ -105,13 +105,13 @@ docker compose up -d
 Without cloning:
 
 ```powershell
-docker pull ghcr.io/wicm84266964/buddy2api:v2.2.21
+docker pull ghcr.io/wicm84266964/buddy2api:v2.2.22
 docker run -d --name buddy2api --restart unless-stopped `
   -p 127.0.0.1:8787:8787 `
   -v buddy2api-data:/app/data `
   -e CB_GATEWAY_ADMIN_TOKEN="cb-admin-replace-with-a-long-random-value" `
   -e CB_DOCKER=1 `
-  ghcr.io/wicm84266964/buddy2api:v2.2.21
+  ghcr.io/wicm84266964/buddy2api:v2.2.22
 ```
 
 ## FAQ
@@ -126,7 +126,13 @@ docker run -d --name buddy2api --restart unless-stopped `
 
 ## Update
 
-The management page checks for a newer `main` in the background (jsDelivr first). A top-bar **Update to vx.y.z** button runs `git pull --ff-only`, reinstalls requirements, and restarts. That pull and install reuse `HTTPS_PROXY`, `ALL_PROXY`, or an explicit OS proxy address. The button does not hardcode a port or change Git config. A PAC script with no explicit address still leaves Git connecting directly. A failed check stays silent. Docker images, zip copies, and non-`main` checkouts keep using a manual update. For Docker, pull the tag pinned in compose and restart: `docker compose pull` then `docker compose up -d`. To preview the button on an already-current install, start with `CB_GATEWAY_FAKE_LATEST=9.9.9`; the click does not pull or restart.
+The management page checks for a newer `main` in the background (jsDelivr first). A top-bar **Update to vx.y.z** button runs `git pull --ff-only`, reinstalls requirements, and restarts. That pull and install reuse `HTTPS_PROXY`, `ALL_PROXY`, or an explicit OS proxy address. The button does not hardcode a port or change Git config. A PAC script with no explicit address still leaves Git connecting directly.
+
+If all version sources fail, the checker also tries the source archive at `codeload.github.com`. A Git connection failure or timeout falls back to that archive, without requiring a proxy, provided codeload is reachable.
+
+Archive updates validate the version, preserve `.env`, databases and local files, and stop on local edits, commits or file conflicts. Backups and recovery manifests are saved under `.git/buddy2api-update-*`; Git history stays intact. Subsequent one-click updates continue through codeload, with managed file hashes in `.git/buddy2api-codeload.json`. Do not delete that state file to force a Git pull.
+
+A failed check stays silent. Docker images, zip copies, and non-`main` checkouts keep using a manual update. For Docker, pull the tag pinned in compose and restart: `docker compose pull` then `docker compose up -d`. To preview the button on an already-current install, start with `CB_GATEWAY_FAKE_LATEST=9.9.9`; the click does not pull or restart.
 
 ## Upgrade from 1.4.x
 

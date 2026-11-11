@@ -4,7 +4,7 @@
 
 > 把本机已经登录的消费级 AI 客户端，接成 OpenAI 兼容接口，给 Codex、OpenCode、Cherry Studio、NextChat 等用。默认打开 Work Buddy / CodeBuddy、Qoder、千问办公（QwenWork）、TraeWork、讯飞 Loomy、商汤小浣熊；管理页下拉选其中一个。一次请求只走一个通道。QClaw 已停止运营，通道已下架，积分请改用 WorkBuddy。
 
-当前版本 **2.2.21**。默认通道含 WorkBuddy 国内/国际、Qoder 中国/国际、千问办公、TraeWork、Loomy、小浣熊。没有登录凭证的渠道不会出现在模型列表里。这个项目只供你本人持有的账号在本机使用。不要公开部署，也不要把登录凭据、API Key、数据库文件发给别人。
+当前版本 **2.2.22**。默认通道含 WorkBuddy 国内/国际、Qoder 中国/国际、千问办公、TraeWork、Loomy、小浣熊。没有登录凭证的渠道不会出现在模型列表里。这个项目只供你本人持有的账号在本机使用。不要公开部署，也不要把登录凭据、API Key、数据库文件发给别人。
 
 **仅限自己的账号。严禁使用接码平台、批量注册或任何批量方式薅羊毛。** 不要把网关公开给别人用，也不要代领或倒卖额度。
 
@@ -120,7 +120,7 @@ python server.py
 
 ### Docker
 
-官方镜像只发到 GitHub Container Registry，不发 Docker Hub。地址是 `ghcr.io/wicm84266964/buddy2api`，目前只有 `linux/amd64`。正式版发版成功后会推送同名标签，例如 `ghcr.io/wicm84266964/buddy2api:v2.2.21`，并移动 `latest`。预发布不移动 `latest`。请固定版本标签，不要默认追踪 `latest`。
+官方镜像只发到 GitHub Container Registry，不发 Docker Hub。地址是 `ghcr.io/wicm84266964/buddy2api`，目前只有 `linux/amd64`。正式版发版成功后会推送同名标签，例如 `ghcr.io/wicm84266964/buddy2api:v2.2.22`，并移动 `latest`。预发布不移动 `latest`。请固定版本标签，不要默认追踪 `latest`。
 
 第一次推送后，GitHub Packages 里的包可能是私有的。仓库所有者需要在包设置里把它改成公开，匿名 `docker pull` 才可用。这一步只做一次。
 
@@ -139,13 +139,13 @@ docker compose up -d
 不克隆源码时：
 
 ```powershell
-docker pull ghcr.io/wicm84266964/buddy2api:v2.2.21
+docker pull ghcr.io/wicm84266964/buddy2api:v2.2.22
 docker run -d --name buddy2api --restart unless-stopped `
   -p 127.0.0.1:8787:8787 `
   -v buddy2api-data:/app/data `
   -e CB_GATEWAY_ADMIN_TOKEN="cb-admin-请换成足够长的随机值" `
   -e CB_DOCKER=1 `
-  ghcr.io/wicm84266964/buddy2api:v2.2.21
+  ghcr.io/wicm84266964/buddy2api:v2.2.22
 ```
 
 ### 其他启动方式
@@ -178,7 +178,13 @@ python server.py
 
 ### 更新
 
-管理页打开后会在后台核对远端版本（优先走 jsDelivr，不挡页面）。有新版本时顶栏出现「更新到 vx.y.z」，点一下会 `git pull --ff-only`、安装依赖并重启。这次拉取和安装会沿用已有的 `HTTPS_PROXY`、`ALL_PROXY`，或系统代理里的明确地址；不写死端口，也不改 Git 配置。只填了自动配置脚本（PAC）、没有具体地址时，Git 仍会直连。查不到远端版本时不会报错。Docker、不是 git 克隆、或不在 `main` 上时，按钮会说明原因，仍可用下面的手动步骤。Docker 安装请拉取 compose 钉住的版本后重启：`docker compose pull`，然后 `docker compose up -d`。本机已是最新、只想看按钮时：`$env:CB_GATEWAY_FAKE_LATEST="9.9.9"` 再启动，点下去不会真的拉取或重启。
+管理页打开后会在后台核对远端版本（优先走 jsDelivr，不挡页面）。有新版本时顶栏出现「更新到 vx.y.z」，点一下会 `git pull --ff-only`、安装依赖并重启。这次拉取和安装会沿用已有的 `HTTPS_PROXY`、`ALL_PROXY`，或系统代理里的明确地址；不写死端口，也不改 Git 配置。只填了自动配置脚本（PAC）、没有具体地址时，Git 仍会直连。
+
+如果普通版本源都不可达，会再尝试从 `codeload.github.com` 的源码包读取版本；Git 拉取连接失败或超时时，也会自动尝试 codeload 源码包更新，不要求配置代理。codeload 本身也需要能访问。
+
+源码包会校验版本并保留 `.env`、数据库和本地文件；遇到本地修改、提交或文件冲突会停止。覆盖前的备份和清单保存在 `.git/buddy2api-update-*`，Git 历史不变。切换为源码包更新后，后续一键更新继续使用该方式；更新管理状态保存在 `.git/buddy2api-codeload.json`，不要直接删除该文件后强行拉取。
+
+查不到远端版本时不会报错。Docker、不是 git 克隆、或不在 `main` 上时，按钮会说明原因，仍可用下面的手动步骤。Docker 安装请拉取 compose 钉住的版本后重启：`docker compose pull`，然后 `docker compose up -d`。本机已是最新、只想看按钮时：`$env:CB_GATEWAY_FAKE_LATEST="9.9.9"` 再启动，点下去不会真的拉取或重启。
 
 先 `Ctrl+C` 停掉正在跑的服务：
 

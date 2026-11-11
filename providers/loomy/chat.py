@@ -14,6 +14,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
+from providers.usage import StreamUsage, request_stream_usage, token_counts
 from context_budget import is_context_rejection
 from providers.loomy.constants import CHANNEL_ID, MODEL_BASE, STATIC_MODELS
 from providers.loomy.headers import model_headers
@@ -78,6 +79,7 @@ def _prompt_tokens(payload: dict) -> int:
 
 def _body(payload: dict) -> tuple[dict, str]:
     body = dict(payload)
+    request_stream_usage(body)
     body["model"] = translate_model(str(body.get("model") or "auto"))
     raw = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     return body, raw
@@ -116,6 +118,10 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
         except (httpx.HTTPError, LoomyAuthError) as exc:
             auth_manager.mark_account_failure(account["id"], 503)
             last_error = ("error", (503, {"error": {"message": str(exc)[:240], "type": "server_error"}}))
+            final = attempt == max_attempts - 1
+            _log(api_key_info, account, model_name, False, 0, 0, 0,
+                 "error" if final else "retry", 503, str(exc)[:240], t0,
+                 increment_usage=final)
             continue
         if response.status_code < 400:
             auth_manager.mark_account_success(account["id"])
@@ -126,9 +132,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
             usage = data.get("usage") or {}
             _log(
                 api_key_info, account, model_name, False,
-                int(usage.get("prompt_tokens") or 0),
-                int(usage.get("completion_tokens") or 0),
-                int(usage.get("total_tokens") or 0),
+                *token_counts(usage),
                 ((data.get("choices") or [{}])[0].get("finish_reason") or "stop"),
                 response.status_code, "", t0,
             )
@@ -144,6 +148,10 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
                 pass
         auth_manager.mark_account_failure(account["id"], status)
         last_error = ("error", (status, detail))
+        final = status not in RETRYABLE_STATUS or attempt == max_attempts - 1
+        _log(api_key_info, account, model_name, False, 0, 0, 0,
+             "error" if final else "retry", status, str(detail)[:400], t0,
+             increment_usage=final)
         if status not in RETRYABLE_STATUS:
             return last_error
     return last_error or (
@@ -171,6 +179,9 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
         tried.add(account["id"])
         t0 = time.time()
         started = False
+        observed = StreamUsage()
+        accepted = False
+        completed = False
         try:
             account = await _ready(account)
             async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=None) as client:
@@ -188,23 +199,40 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
                             return
                         auth_manager.mark_account_failure(account["id"], response.status_code)
                         last_error = f"data: {json.dumps(detail, ensure_ascii=False)}\n\n".encode()
+                        final = response.status_code not in RETRYABLE_STATUS or _attempt == max_attempts - 1
+                        _log(api_key_info, account, model_name, True, 0, 0, 0,
+                             "error" if final else "retry", response.status_code, text, t0,
+                             increment_usage=final)
                         if response.status_code not in RETRYABLE_STATUS:
                             yield last_error
                             return
                         continue
                     auth_manager.mark_account_success(account["id"])
+                    accepted = True
                     async for line in response.aiter_lines():
+                        observed.observe(line)
                         if line == "":
                             continue
                         started = True
                         yield (line + "\n\n").encode("utf-8") if not line.endswith("\n") else (line + "\n").encode("utf-8")
-            _log(api_key_info, account, model_name, True, 0, 0, 0, "stop", 200, "", t0)
+            completed = True
             return
         except (httpx.HTTPError, LoomyAuthError) as exc:
+            observed.error = str(exc)[:240]
             if started:
                 return
             auth_manager.mark_account_failure(account["id"], 503)
             last_error = f"data: {json.dumps({'error': {'message': str(exc)[:240]}}, ensure_ascii=False)}\n\n".encode()
+            if not accepted:
+                final = _attempt == max_attempts - 1
+                _log(api_key_info, account, model_name, True, 0, 0, 0,
+                     "error" if final else "retry", 503, observed.error, t0,
+                     increment_usage=final)
+        finally:
+            if accepted:
+                error = observed.error or ("stream interrupted" if not completed else "")
+                _log(api_key_info, account, model_name, True, *observed.counts,
+                     "error" if error else observed.finish, 502 if error else 200, error, t0)
     yield last_error
 
 

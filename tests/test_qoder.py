@@ -528,3 +528,7 @@ def test_qoder_failover_reaches_fifth_account(isolated_db, monkeypatch, stream):
         return result[1]["choices"][0]["message"]["content"]
     assert "fifth" in asyncio.run(run())
     assert visited == accounts
+    logs = db.list_logs()
+    assert len(logs) == 5
+    assert all(row["stream"] == int(stream) for row in logs)
+    assert logs[0]["status_code"] == 200

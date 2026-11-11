@@ -48,6 +48,9 @@ def test_check_failure_is_silent(monkeypatch):
         raise OSError("blocked")
 
     monkeypatch.setattr(self_update, "_get", fake_get)
+    async def failed_archive():
+        raise OSError("blocked")
+    monkeypatch.setattr(self_update, "_get_archive", failed_archive)
     monkeypatch.setattr(self_update, "install_kind", lambda: "git")
     payload = asyncio.run(self_update.check(force=True))
     assert payload["checked"] is False

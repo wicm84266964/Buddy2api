@@ -1325,6 +1325,9 @@ def record_request(data: dict):
                     (data.get("total_tokens", 0), now, data["api_key_id"]),
                 )
             conn.commit()
+    from request_logging import note_record
+
+    note_record(data)
 
 
 def prune_logs(retention_days: int | None = None) -> int:
