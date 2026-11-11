@@ -14,6 +14,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
+from providers.usage import StreamUsage, request_stream_usage, token_counts
 from reasoning_controls import normalize_chat_reasoning
 from providers.qclaw.constants import AIZONE_BASE, CHANNEL_ID, RETRYABLE_STATUS
 from providers.qclaw.sign import aizone_headers
@@ -117,6 +118,7 @@ def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, tota
 
 def _build_body(payload: dict) -> tuple[dict, str]:
     body = normalize_chat_reasoning(payload)
+    request_stream_usage(body)
     body["model"] = translate_model(str(body.get("model") or "default"))
     raw = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
     return body, raw
@@ -168,9 +170,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
             usage = data.get("usage") or {}
             _log(
                 api_key_info, account, model_name, False,
-                int(usage.get("prompt_tokens") or 0),
-                int(usage.get("completion_tokens") or 0),
-                int(usage.get("total_tokens") or 0),
+                *token_counts(usage),
                 ((data.get("choices") or [{}])[0].get("finish_reason") or "stop"),
                 response.status_code, "", t0,
             )
@@ -208,6 +208,7 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
         tried.add(account["id"])
         t0 = time.time()
         output_started = False
+        observed = StreamUsage()
         try:
             headers = _headers_for(account)
             async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=None) as client:
@@ -229,6 +230,7 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
                         continue
                     auth_manager.mark_account_success(account["id"])
                     async for line in response.aiter_lines():
+                        observed.observe(line)
                         if not line:
                             continue
                         if not line.startswith("data:"):
@@ -247,7 +249,9 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
                             payload = data
                         output_started = True
                         yield f"data: {payload}\n\n".encode("utf-8")
-            _log(api_key_info, account, model_name, True, 0, 0, 0, "stop", 200, "", t0)
+            _log(api_key_info, account, model_name, True, *observed.counts,
+                 "error" if observed.error else observed.finish,
+                 502 if observed.error else 200, observed.error, t0)
             return
         except httpx.HTTPError as exc:
             if output_started:

@@ -786,6 +786,9 @@ async def _walk_account_queue(name: str, payload: dict, api_key_info: dict | Non
 async def _chat_after_bind_no_echo(
     bound: BindResult, payload: dict, api_key_info: dict | None
 ) -> tuple:
+    from request_logging import bind_dispatch
+
+    bind_dispatch(bound.channel, auth_manager.pinned_for(bound.channel), bound.inner)
     provider = providers.get_provider(bound.channel)
     if provider is None:
         raise UnknownChannel(bound.channel)

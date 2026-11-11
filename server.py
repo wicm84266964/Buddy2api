@@ -34,6 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from starlette.concurrency import run_in_threadpool
 from streaming import ClosingStreamingResponse
+from request_logging import FailureLogMiddleware, bind_request
 
 import database as db
 import auth_manager
@@ -92,6 +93,7 @@ async def _lifespan(_app):
 
 
 app = FastAPI(title="Buddy 2 API", version=VERSION, lifespan=_lifespan)
+app.add_middleware(FailureLogMiddleware)
 _CORS_ORIGINS = _cors_origins()
 
 app.add_middleware(
@@ -457,6 +459,7 @@ async def chat_completions(
     )
     payload = await _read_json_object(request)
 
+    bind_request(api_key_info, payload)
     messages = payload.get("messages") or []
     if not isinstance(messages, list) or not messages or not all(isinstance(message, dict) for message in messages):
         raise HTTPException(status_code=400, detail={"error": {"message": "messages is required", "type": "invalid_request_error"}})
@@ -503,6 +506,7 @@ async def resp_responses(
         lambda: _check_client_auth(authorization, x_api_key, consume_quota=False)
     )
     payload = await _read_json_object(request)
+    bind_request(api_key_info, payload)
     if "input" not in payload:
         raise HTTPException(
             status_code=400,

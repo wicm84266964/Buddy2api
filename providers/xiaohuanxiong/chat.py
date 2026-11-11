@@ -14,6 +14,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
+from providers.usage import request_stream_usage, token_counts
 from providers.xiaohuanxiong.constants import CHANNEL_ID, LLM_BASE, STATIC_MODELS
 from providers.xiaohuanxiong.headers import client_headers
 from providers.xiaohuanxiong.token import (
@@ -88,6 +89,7 @@ def _log_failure(api_key_info, account, model_name, stream, status, message, t0,
 
 def _body(payload: dict) -> tuple[dict, str]:
     body = dict(payload)
+    request_stream_usage(body)
     body["model"] = translate_model(str(body.get("model") or "auto"))
     return body, json.dumps(body, ensure_ascii=False, separators=(",", ":"))
 
@@ -138,9 +140,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
             usage = data.get("usage") or {}
             _log(
                 api_key_info, account, model_name, False,
-                int(usage.get("prompt_tokens") or 0),
-                int(usage.get("completion_tokens") or 0),
-                int(usage.get("total_tokens") or 0),
+                *token_counts(usage),
                 ((data.get("choices") or [{}])[0].get("finish_reason") or "stop"),
                 response.status_code, "", t0,
             )
@@ -235,7 +235,7 @@ async def _stream(raw: str, api_key_info, model_name: str) -> AsyncGenerator[byt
                                     chunk = json.loads(data)
                                     if isinstance(chunk, dict):
                                         if isinstance(chunk.get("usage"), dict):
-                                            usage = chunk["usage"]
+                                            usage.update(chunk["usage"])
                                         choice = (chunk.get("choices") or [{}])[0]
                                         if isinstance(choice, dict) and choice.get("finish_reason"):
                                             finish = choice["finish_reason"]

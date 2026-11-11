@@ -322,6 +322,53 @@ def all_channels(monkeypatch):
     monkeypatch.delenv("CB_GATEWAY_PROVIDERS", raising=False)
 
 
+@pytest.mark.parametrize("channel", ["workbuddy", "qwenwork", "traework"])
+def test_catalog_refresh_allows_zero_quota_without_changing_chat_gate(
+    isolated_db, all_channels, monkeypatch, channel,
+):
+    import catalog
+
+    aid = db.add_account({
+        "name": "zero-quota", "uid": "zero-quota", "provider": channel,
+        "access_token": "token", "expires_at": 9_999_999_999_999,
+    })
+    db.merge_account_resource_cache(aid, {"ok": True, "remaining": 0.0})
+    account = db.get_account(aid)
+    assert not routing.account_available(account)
+    before = routing.quota_exempt_channels()
+
+    async def fetch(selected):
+        assert selected["id"] == aid
+        assert routing.quota_exempt_channels() == before
+        return [{"id": "live-model"}]
+
+    monkeypatch.setitem(catalog.LIVE_FETCHERS, channel, fetch)
+    result = asyncio.run(catalog.refresh_one(channel))
+    assert result["mode"] == "live"
+    assert result["models"][0]["id"] == "live-model"
+    assert routing.quota_exempt_channels() == before
+    assert not routing.account_available(account)
+    assert providers.get_provider(channel).pick_account() is None
+
+
+def test_catalog_refresh_still_rejects_disabled_account(isolated_db, all_channels, monkeypatch):
+    import catalog
+
+    db.add_account({
+        "name": "disabled", "uid": "disabled", "provider": "traework",
+        "status": "inactive", "access_token": "token",
+    })
+
+    async def fetch(_account):
+        pytest.fail("Disabled accounts must not fetch catalogs")
+
+    monkeypatch.setitem(catalog.LIVE_FETCHERS, "traework", fetch)
+    result = asyncio.run(catalog.refresh_one("traework"))
+    assert result["mode"] == "fallback"
+    assert result["message"] == "no usable account"
+    assert routing.quota_exempt_channels() == frozenset()
+
+
 def _seed_live_accounts():
     db.add_account(
         {
