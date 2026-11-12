@@ -133,3 +133,60 @@ def test_incomplete_compaction_stream_is_not_returned_as_success(wire):
             return await chat._post_collected(client, {"access_token": "test"}, "{}")
     with pytest.raises(httpx.RemoteProtocolError):
         asyncio.run(run())
+
+@pytest.mark.parametrize('stream', [False, True])
+@pytest.mark.parametrize('failure', [502, 'disconnect'])
+def test_proxy_retry_recovers_without_account_cooldown(request_env, monkeypatch, stream, failure):
+    attempts = []
+    logs = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        @asynccontextmanager
+        async def stream(self, *args, **kwargs):
+            attempts.append(kwargs['content'])
+            if len(attempts) == 1:
+                if failure == 'disconnect':
+                    raise httpx.RemoteProtocolError('no response headers')
+                yield httpx.Response(502, text='<html>502 xunfei</html>')
+            else:
+                yield httpx.Response(200, headers={'content-type': 'text/event-stream'}, text=(
+                    'data: {"choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}],'
+                    '"usage":{"prompt_tokens":7,"completion_tokens":1,"total_tokens":8,"points_consumed":2}}\n\n'
+                    'data: [DONE]\n\n'
+                ))
+
+    async def sleep(delay):
+        pass
+
+    monkeypatch.setattr(chat.httpx, 'AsyncClient', Client)
+    monkeypatch.setattr(chat.asyncio, 'sleep', sleep)
+    monkeypatch.setattr(chat, '_log', lambda *a, **kw: logs.append((a, kw)))
+
+    async def run():
+        kind, result = await chat.chat_completions({'model': 'qwen3.8-flash', 'stream': stream}, None)
+        if stream:
+            text = b''.join([chunk async for chunk in result]).decode()
+            assert text.count('OK') == 1
+            assert '[DONE]' in text
+        else:
+            assert kind == 'json'
+            assert result['choices'][0]['message']['content'] == 'OK'
+
+    asyncio.run(run())
+    assert len(attempts) == 2
+    assert request_env['failures'] == []
+    assert len(logs) == 2
+    assert logs[0][0][7] == 'retry'
+    assert logs[0][1]['increment_usage'] is False
+    assert logs[1][0][8] == 200
+    assert logs[1][0][4:7] == (7, 1, 8)
+    assert logs[1][1]['usage']['points_consumed'] == 2
