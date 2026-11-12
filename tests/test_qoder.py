@@ -532,3 +532,54 @@ def test_qoder_failover_reaches_fifth_account(isolated_db, monkeypatch, stream):
     assert len(logs) == 5
     assert all(row["stream"] == int(stream) for row in logs)
     assert logs[0]["status_code"] == 200
+
+
+@pytest.mark.parametrize("channel", ["qoder", "qoder-i"])
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("credit", [None, 0, 1.25])
+def test_qoder_envelope_usage_reaches_logs_and_client(isolated_db, monkeypatch, channel, stream, credit):
+    import httpx
+    from providers.qoder import chat
+    aid = db.add_account({"name": "usage", "uid": "usage", "provider": channel})
+
+    async def pick(channel, excluded):
+        return db.get_account(aid) if aid not in excluded else None
+
+    usage = {"prompt_tokens": 10, "completion_tokens": 2}
+    if credit is not None:
+        usage["points_consumed"] = credit
+    body = '\n\n'.join('data: ' + json.dumps({"body": json.dumps(item)}) for item in [
+        {"choices": [{"delta": {"content": "OK"}}]},
+        {"choices": [], "usage": usage},
+        {"choices": [], "usage": {"total_tokens": 12}},
+    ]) + '\n\n'
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(chat, "_pick", pick)
+    monkeypatch.setattr(chat, "_signed_request", lambda *args: ("https://upstream.test/chat", {}, b"{}"))
+    monkeypatch.setattr(chat.httpx, "AsyncClient", lambda **kw: original_client(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, text=body))))
+    monkeypatch.setattr(chat.auth_manager, "mark_account_success", lambda *args: None)
+
+    async def run():
+        kind, result = await chat.chat_completions(channel, {"model": "auto", "stream": stream}, None)
+        if kind == "stream":
+            chunks = []
+            try:
+                async for part in result:
+                    chunks.append(part)
+                    if b"data: [DONE]" in part:
+                        break
+            finally:
+                await result.aclose()
+            return b"".join(chunks).decode()
+        assert result["usage"]["total_tokens"] == 12
+        assert result["usage"].get("points_consumed") == credit
+        return json.dumps(result)
+
+    output = asyncio.run(run())
+    assert '"usage"' in output
+    log = db.list_logs()[0]
+    assert log["credit"] == credit
+    assert log["total_tokens"] == 12
+    assert log["stream"] == int(stream)
+    assert db.get_account(aid)["total_credits"] == (credit or 0)

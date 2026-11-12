@@ -1309,7 +1309,7 @@ def record_request(data: dict):
                     WHERE id=?
                     """,
                     (
-                        data.get("total_tokens", 0), data.get("credit", 0),
+                        data.get("total_tokens", 0), data.get("credit") or 0,
                         now, now, data["account_id"],
                     ),
                 )

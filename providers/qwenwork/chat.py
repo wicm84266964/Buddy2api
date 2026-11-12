@@ -15,6 +15,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
+from providers.usage import credit_amount, token_counts
 from reasoning_controls import resolve_reasoning_control
 from providers.qwenwork import cosy
 from providers.qwenwork.encode import EncodeError
@@ -82,7 +83,7 @@ def _ids(account: dict) -> tuple[str, str, str, str]:
 
 
 def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, total_t,
-         finish_reason, status_code, error_msg, t0, increment_usage=True):
+         finish_reason, status_code, error_msg, t0, increment_usage=True, *, usage=None):
     try:
         db.record_request(
             {
@@ -98,7 +99,7 @@ def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, tota
                 "prompt_tokens": prompt_t,
                 "completion_tokens": completion_t,
                 "total_tokens": total_t,
-                "credit": 0,
+                "credit": credit_amount(usage),
                 "finish_reason": finish_reason,
                 "duration_ms": int((time.time() - t0) * 1000),
                 "status_code": status_code,
@@ -349,7 +350,8 @@ def _aggregate(chunks: list[dict], model: str) -> dict:
         if not isinstance(item, dict):
             continue
         response_id = item.get("id") or response_id
-        usage = item.get("usage") or usage
+        if isinstance(item.get("usage"), dict):
+            usage.update(item["usage"])
         choice = (item.get("choices") or [{}])[0]
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta") or {}
@@ -476,7 +478,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
                 int(usage.get("completion_tokens") or 0),
                 int(usage.get("total_tokens") or 0),
                 aggregated["choices"][0].get("finish_reason") or "stop",
-                200, "", t0,
+                200, "", t0, usage=usage,
             )
             return ("json", aggregated)
         except (httpx.HTTPError, EncodeError) as exc:
@@ -540,26 +542,28 @@ async def _stream(raw: str, request_id: str, upstream_model: str, api_key_info, 
                             return
                         outer_usage, outer_finish = usage_from_payload(data)
                         if outer_usage:
-                            usage = outer_usage
+                            usage.update(outer_usage)
                         if outer_finish:
                             finish = outer_finish
                         for inner in unwrap_sse_payload(data):
                             inner_usage, inner_finish = usage_from_payload(inner)
                             if inner_usage:
-                                usage = inner_usage
+                                usage.update(inner_usage)
                             if inner_finish:
                                 finish = inner_finish
                             output_started = True
                             yield f"data: {inner}\n\n".encode("utf-8")
-            if output_started:
-                yield b"data: [DONE]\n\n"
             prompt_t = int(usage.get("prompt_tokens") or 0)
             completion_t = int(usage.get("completion_tokens") or 0)
             total_t = int(usage.get("total_tokens") or (prompt_t + completion_t))
-            _log(api_key_info, account, model_name, True, prompt_t, completion_t, total_t, finish, 200, "", t0)
+            _log(api_key_info, account, model_name, True, prompt_t, completion_t, total_t, finish, 200, "", t0, usage=usage)
+            if output_started:
+                yield b"data: [DONE]\n\n"
             return
         except (httpx.HTTPError, EncodeError) as exc:
             if output_started:
+                _log(api_key_info, account, model_name, True, *token_counts(usage),
+                     "error", 502, str(exc).strip() or type(exc).__name__, t0, usage=usage)
                 return
             auth_manager.mark_account_failure(account["id"], 503)
             last_error = f"data: {json.dumps({'error': {'message': str(exc)[:240]}}, ensure_ascii=False)}\n\n".encode()

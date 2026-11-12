@@ -14,7 +14,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
-from providers.usage import request_stream_usage, token_counts
+from providers.usage import credit_amount, request_stream_usage, token_counts
 from providers.xiaohuanxiong.constants import CHANNEL_ID, LLM_BASE, STATIC_MODELS
 from providers.xiaohuanxiong.headers import client_headers
 from providers.xiaohuanxiong.token import (
@@ -48,7 +48,7 @@ def accepts_model(inner: str) -> bool:
 
 
 def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, total_t,
-         finish_reason, status_code, error_msg, t0, increment_usage=True):
+         finish_reason, status_code, error_msg, t0, increment_usage=True, *, usage=None):
     try:
         db.record_request(
             {
@@ -64,7 +64,7 @@ def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, tota
                 "prompt_tokens": prompt_t,
                 "completion_tokens": completion_t,
                 "total_tokens": total_t,
-                "credit": 0,
+                "credit": credit_amount(usage),
                 "finish_reason": finish_reason,
                 "duration_ms": int((time.time() - t0) * 1000),
                 "status_code": status_code,
@@ -76,14 +76,15 @@ def _log(api_key_info, account, model_name, stream, prompt_t, completion_t, tota
         pass
 
 
-def _log_failure(api_key_info, account, model_name, stream, status, message, t0, *, final):
+def _log_failure(api_key_info, account, model_name, stream, status, message, t0, *, final, usage=None):
     _log(
-        api_key_info, account, model_name, stream, 0, 0, 0,
+        api_key_info, account, model_name, stream, *token_counts(usage or {}),
         "error" if final else "retry",
         status,
         (message or "")[:400],
         t0,
         increment_usage=final,
+        usage=usage,
     )
 
 
@@ -142,7 +143,7 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
                 api_key_info, account, model_name, False,
                 *token_counts(usage),
                 ((data.get("choices") or [{}])[0].get("finish_reason") or "stop"),
-                response.status_code, "", t0,
+                response.status_code, "", t0, usage=usage,
             )
             return ("json", data)
         status = response.status_code
@@ -228,6 +229,8 @@ async def _stream(raw: str, api_key_info, model_name: str) -> AsyncGenerator[byt
                     async for line in response.aiter_lines():
                         if line == "":
                             continue
+                        if line.strip() == "data: [DONE]":
+                            break
                         if line.startswith("data:"):
                             data = line[5:].strip()
                             if data and data != "[DONE]":
@@ -246,12 +249,13 @@ async def _stream(raw: str, api_key_info, model_name: str) -> AsyncGenerator[byt
             prompt_t = int(usage.get("prompt_tokens") or 0)
             completion_t = int(usage.get("completion_tokens") or 0)
             total_t = int(usage.get("total_tokens") or (prompt_t + completion_t))
-            _log(api_key_info, account, model_name, True, prompt_t, completion_t, total_t, finish, 200, "", t0)
+            _log(api_key_info, account, model_name, True, prompt_t, completion_t, total_t, finish, 200, "", t0, usage=usage)
+            yield b"data: [DONE]\n\n"
             return
         except (httpx.HTTPError, XiaohuanxiongAuthError) as exc:
             message = str(exc)[:240]
             if started:
-                _log_failure(api_key_info, account, model_name, True, 503, message, t0, final=True)
+                _log_failure(api_key_info, account, model_name, True, 503, message, t0, final=True, usage=usage)
                 return
             auth_manager.mark_account_failure(account["id"], 503)
             last_error = f"data: {json.dumps({'error': {'message': message}}, ensure_ascii=False)}\n\n".encode()

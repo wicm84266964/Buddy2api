@@ -16,6 +16,7 @@ from typing import AsyncGenerator, Optional
 import proxy
 from reasoning_controls import normalize_chat_reasoning
 from streaming import ClosingStream, close_stream
+from providers.usage import credit_amount
 
 
 _DEBUG_SECRET_KEYS = {
@@ -376,7 +377,7 @@ def _responses_usage(usage: dict) -> dict:
     output_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
     input_details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
     output_details = usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
-    return {
+    result = {
         "input_tokens": input_tokens,
         "input_tokens_details": {
             "cached_tokens": input_details.get("cached_tokens", 0),
@@ -387,6 +388,11 @@ def _responses_usage(usage: dict) -> dict:
         },
         "total_tokens": usage.get("total_tokens", input_tokens + output_tokens),
     }
+    for key in ("credit", "points_consumed"):
+        amount = credit_amount({key: usage.get(key)})
+        if amount is not None:
+            result[key] = amount
+    return result
 
 
 def _response_error(error: Optional[dict]) -> Optional[dict]:
