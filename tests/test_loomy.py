@@ -1,4 +1,6 @@
 import asyncio
+import copy
+import json
 
 import pytest
 
@@ -9,6 +11,39 @@ from providers.loomy.models import parse_supplier_models
 from providers.loomy.quota import parse_quota
 from providers.loomy.signer import sign, string_to_sign
 from providers.loomy.store import session_to_account
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_trimmed_history_does_not_forward_standalone_thinking(monkeypatch, stream):
+    import context_budget
+    import router
+    from providers.loomy import chat
+
+    monkeypatch.setattr(chat, "translate_model", lambda model: model)
+    thinking = {"role": "assistant", "content": None, "reasoning_content": "private thought"}
+    call = {
+        "role": "assistant", "content": None, "reasoning_content": "tool reasoning",
+        "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}],
+    }
+    result = {"role": "tool", "tool_call_id": "call-1", "content": "result"}
+    answer = {"role": "assistant", "content": "answer", "reasoning_content": "answer reasoning"}
+    refusal = {"role": "assistant", "content": None, "reasoning_content": "refusal reasoning", "refusal": "refused"}
+    payload = {"model": "qwen3.8-flash", "stream": stream, "messages": [
+        {"role": "system", "content": "keep"},
+        {"role": "user", "content": "old " * 1000},
+        thinking, call, result, answer, refusal, {"role": "user", "content": "continue"},
+    ]}
+    original = copy.deepcopy(payload)
+    retained = {**payload, "messages": [payload["messages"][0], *payload["messages"][2:]]}
+    trimmed, changed = context_budget.trim_to_limit(payload, router.estimate_prompt_tokens(retained))
+    assert changed
+    assert trimmed["messages"][1] == thinking
+    body, raw = chat._body(trimmed)
+    assert thinking not in body["messages"]
+    assert body["messages"] == [payload["messages"][0], call, result, answer, refusal, payload["messages"][-1]]
+    assert json.loads(raw) == body
+    assert trimmed["messages"][1] == thinking
+    assert payload == original
 
 
 @pytest.fixture()

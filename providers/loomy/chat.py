@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import AsyncExitStack, asynccontextmanager
 import json
 import time
 from typing import AsyncGenerator
@@ -79,6 +81,24 @@ def _prompt_tokens(payload: dict) -> int:
 
 def _body(payload: dict) -> tuple[dict, str]:
     body = dict(payload)
+    if isinstance(body.get("messages"), list):
+        # Some agents persist standalone thinking events as assistant messages.
+        # They have no conversational content or tool call. DashScope rejects
+        # these (sometimes by disconnecting), particularly when history trimming
+        # leaves one at the beginning of the retained conversation. Keep the
+        # reasoning on real answers/tool calls, including active tool cycles.
+        body["messages"] = [
+            message for message in body["messages"]
+            if not (
+                isinstance(message, dict)
+                and message.get("role") == "assistant"
+                and message.get("reasoning_content")
+                and not message.get("content")
+                and not message.get("tool_calls")
+                and not message.get("function_call")
+                and not message.get("refusal")
+            )
+        ]
     request_stream_usage(body)
     body["model"] = translate_model(str(body.get("model") or "auto"))
     raw = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
@@ -99,12 +119,36 @@ def _request_error(exc: Exception, timeout: int) -> tuple[int, str]:
     return 503, detail[:240]
 
 
-async def _post_collected(client, account: dict, raw: str) -> httpx.Response:
+@asynccontextmanager
+async def _open_stream(client, account: dict, raw: str, on_retry=None):
+    """Retry one proxy failure before exposing a response; never replay a stream."""
+    for attempt in range(2):
+        async with AsyncExitStack() as stack:
+            try:
+                response = await stack.enter_async_context(client.stream(
+                    "POST", f"{MODEL_BASE}/chat/completions",
+                    headers=model_headers(str(account.get("access_token") or "")), content=raw,
+                ))
+            except httpx.RemoteProtocolError as exc:
+                if attempt:
+                    raise
+                status, detail = 503, f"{type(exc).__name__}: {exc}"
+            else:
+                if attempt or response.status_code not in {502, 503}:
+                    # Keep yield outside the opening-error handler: exceptions
+                    # while consuming an accepted stream must never retry it.
+                    yield response
+                    return
+                status = response.status_code
+                detail = (await response.aread()).decode("utf-8", errors="replace")[:400]
+            if on_retry:
+                on_retry(status, detail)
+        await asyncio.sleep(0.5)
+
+
+async def _post_collected(client, account: dict, raw: str, on_retry=None) -> httpx.Response:
     """Keep upstream SSE active while returning one JSON response to the client."""
-    async with client.stream(
-        "POST", f"{MODEL_BASE}/chat/completions",
-        headers=model_headers(str(account.get("access_token") or "")), content=raw,
-    ) as response:
+    async with _open_stream(client, account, raw, on_retry) as response:
         if response.status_code >= 400 or "application/json" in response.headers.get("content-type", ""):
             await response.aread()
             return response
@@ -191,7 +235,10 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
         try:
             account = await _ready(account)
             async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=timeout) as client:
-                response = await _post_collected(client, account, raw)
+                response = await _post_collected(client, account, raw, lambda status, detail: _log(
+                    api_key_info, account, model_name, False, 0, 0, 0,
+                    "retry", status, detail, t0, increment_usage=False,
+                ))
         except (httpx.HTTPError, LoomyAuthError) as exc:
             status, message = _request_error(exc, timeout)
             # A slow response belongs to this request, not to account health.
@@ -268,12 +315,10 @@ async def _stream(body: dict, raw: str, api_key_info, model_name: str) -> AsyncG
         try:
             account = await _ready(account)
             async with rate_limiter.account_slot(account), httpx.AsyncClient(verify=TLS_CONTEXT, timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    f"{MODEL_BASE}/chat/completions",
-                    headers=model_headers(str(account.get("access_token") or "")),
-                    content=raw,
-                ) as response:
+                async with _open_stream(client, account, raw, lambda status, detail: _log(
+                    api_key_info, account, model_name, True, 0, 0, 0,
+                    "retry", status, detail, t0, increment_usage=False,
+                )) as response:
                     if response.status_code >= 400:
                         text = (await response.aread()).decode("utf-8", errors="replace")[:400]
                         detail = {"error": {"message": text, "type": "upstream_error"}}
