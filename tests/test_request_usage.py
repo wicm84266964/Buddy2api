@@ -7,7 +7,19 @@ import json
 import httpx
 import pytest
 
+import credential_crypto
+import database as db
 from providers.usage import StreamUsage, token_counts, credit_amount
+
+
+@pytest.fixture(autouse=True)
+def isolated_usage_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "usage.db")
+    monkeypatch.setenv("CB_GATEWAY_MASTER_KEY", "usage-test-master-key")
+    credential_crypto.reset_cache()
+    db.init_db()
+    yield
+    credential_crypto.reset_cache()
 
 
 def patch_channel(monkeypatch, channel, *, lines=(), response=None):
