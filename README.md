@@ -4,7 +4,7 @@
 
 > 把本机已经登录的消费级 AI 客户端，接成 OpenAI 兼容接口，给 Codex、OpenCode、Cherry Studio、NextChat 等用。默认打开 Work Buddy / CodeBuddy、Qoder、千问办公（QwenWork）、TraeWork、讯飞 Loomy、商汤小浣熊；管理页下拉选其中一个。一次请求只走一个通道。QClaw 已停止运营，通道已下架，积分请改用 WorkBuddy。
 
-当前版本 **2.2.22**。默认通道含 WorkBuddy 国内/国际、Qoder 中国/国际、千问办公、TraeWork、Loomy、小浣熊。没有登录凭证的渠道不会出现在模型列表里。这个项目只供你本人持有的账号在本机使用。不要公开部署，也不要把登录凭据、API Key、数据库文件发给别人。
+当前版本 **2.2.23**。默认通道含 WorkBuddy 国内/国际、Qoder 中国/国际、千问办公、TraeWork、Loomy、小浣熊。没有登录凭证的渠道不会出现在模型列表里。这个项目只供你本人持有的账号在本机使用。不要公开部署，也不要把登录凭据、API Key、数据库文件发给别人。
 
 **仅限自己的账号。严禁使用接码平台、批量注册或任何批量方式薅羊毛。** 不要把网关公开给别人用，也不要代领或倒卖额度。
 
@@ -46,6 +46,10 @@ python server.py
 | 最小请求间隔 | 0 秒 | 0–600 秒；0 关闭间隔限制，按两次上游调用的开始时间计算 |
 | 每账号最大并发 | 0 | 0–100；0 不限制，流式响应结束或取消才释放名额 |
 | 最长排队时间 | 120 秒 | 1–600 秒；按账号先进先出，排队超时尝试队列中的其他账号 |
+
+同一区域的「上游响应超时」独立于排队时间，默认 300 秒，范围 5–600 秒。Loomy 非流式聊天（包括智能体的长会话压缩）和账号测试读取此设置；流式聊天保持持续读取，不受此项限制。Loomy 非流式读取超时返回 HTTP 504，日志包含超时秒数和异常类型，不因此将账号置于冷却。
+
+Loomy 非流式聊天会在网关内部接收上游 SSE 并汇总为 JSON，降低长摘要等待完整响应时触发上游反向代理超时的风险；客户端仍按非流式协议调用，日志也按非流式记录。设置中的响应超时限制内部流读取的等待间隔。上游直接返回 HTTP 504 时同样不会因此冷却账号。
 
 所有渠道的 Chat Completions 和 Responses、流式/非流式、内部重试和账号测试都受控。登录、签到、额度查询不占模型调用名额。设置保存后生效；间隔和并发都设为 0 即关闭。
 
@@ -120,7 +124,7 @@ python server.py
 
 ### Docker
 
-官方镜像只发到 GitHub Container Registry，不发 Docker Hub。地址是 `ghcr.io/wicm84266964/buddy2api`，目前只有 `linux/amd64`。正式版发版成功后会推送同名标签，例如 `ghcr.io/wicm84266964/buddy2api:v2.2.22`，并移动 `latest`。预发布不移动 `latest`。请固定版本标签，不要默认追踪 `latest`。
+官方镜像只发到 GitHub Container Registry，不发 Docker Hub。地址是 `ghcr.io/wicm84266964/buddy2api`，目前只有 `linux/amd64`。正式版发版成功后会推送同名标签，例如 `ghcr.io/wicm84266964/buddy2api:v2.2.23`，并移动 `latest`。预发布不移动 `latest`。请固定版本标签，不要默认追踪 `latest`。
 
 第一次推送后，GitHub Packages 里的包可能是私有的。仓库所有者需要在包设置里把它改成公开，匿名 `docker pull` 才可用。这一步只做一次。
 
@@ -139,13 +143,13 @@ docker compose up -d
 不克隆源码时：
 
 ```powershell
-docker pull ghcr.io/wicm84266964/buddy2api:v2.2.22
+docker pull ghcr.io/wicm84266964/buddy2api:v2.2.23
 docker run -d --name buddy2api --restart unless-stopped `
   -p 127.0.0.1:8787:8787 `
   -v buddy2api-data:/app/data `
   -e CB_GATEWAY_ADMIN_TOKEN="cb-admin-请换成足够长的随机值" `
   -e CB_DOCKER=1 `
-  ghcr.io/wicm84266964/buddy2api:v2.2.22
+  ghcr.io/wicm84266964/buddy2api:v2.2.23
 ```
 
 ### 其他启动方式

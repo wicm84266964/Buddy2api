@@ -680,7 +680,7 @@ createApp({
   function n(v){return Number(v||0).toLocaleString()}
   function tok(v){v=Number(v||0);if(v>=1e9)return (v/1e9).toFixed(v>=1e10?1:2).replace(/\.?0+$/,'')+'B';if(v>=1e6)return (v/1e6).toFixed(v>=1e7?1:2).replace(/\.?0+$/,'')+'M';return v.toLocaleString()}
   function pct(v){return (Number(v||0)).toFixed(Number(v||0)%1?1:0)+'%'}
-  function money(v){return Number(v||0).toFixed(4).replace(/\.?0+$/,'')}
+  function money(v){if(v===null)return '未返回';return Number(v||0).toFixed(4).replace(/\.?0+$/,'')}
   function channelUnitLabel(ch){const u=ch&&ch.unit||'';if(u==='token')return '今日 token';if(u==='credit')return '积分';return '额度'}
   function channelQuotaText(ch){if(!ch)return '—';if(ch.unit==='token'){if(ch.used!=null&&ch.limit!=null)return tok(ch.used)+' / '+tok(ch.limit);if(ch.remaining!=null)return tok(ch.remaining);return '—'}if(ch.remaining!=null)return money(ch.remaining);return '—'}
   function ms(v){v=Number(v||0);return v>=1000?(v/1000).toFixed(1)+'s':v+'ms'}
@@ -1479,7 +1479,7 @@ createApp({
   function fmt(t){return t?new Date(t*1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'-'}
   function n(v){return Number(v||0).toLocaleString()}
   function tok(v){v=Number(v||0);if(v>=1e9)return (v/1e9).toFixed(v>=1e10?1:2).replace(/\.?0+$/,'')+'B';if(v>=1e6)return (v/1e6).toFixed(v>=1e7?1:2).replace(/\.?0+$/,'')+'M';return v.toLocaleString()}
-  function money(v){return Number(v||0).toFixed(4).replace(/\.?0+$/,'')}
+  function money(v){if(v===null)return '未返回';return Number(v||0).toFixed(4).replace(/\.?0+$/,'')}
   function ms(v){v=Number(v||0);return v>=1000?(v/1000).toFixed(1)+'s':v+'ms'}
   function statusClass(x){return x.status_code>=200&&x.status_code<300&&x.finish_reason!=='error'&&x.finish_reason!=='content_filter'?'ok':(x.finish_reason==='content_filter'?'warn':'err')}
   function statusText(x){return x.finish_reason||x.status_code||'-'}
@@ -1598,6 +1598,7 @@ createApp({
           <div class="field"><label>最小请求间隔（秒）</label><input v-model.number="s.rate_limit_interval_seconds" type="number" min="0" max="600" step="0.1"/><div class="hint">同账号两次请求开始的最小间隔，0 关闭。重试和账号测试也会排队。</div></div>
           <div class="field"><label>每账号最大并发</label><input v-model.number="s.rate_limit_max_concurrent" type="number" min="0" max="100" step="1"/><div class="hint">0 不限制。流式请求直到上游响应结束或取消才释放名额。</div></div>
           <div class="field"><label>最长排队时间（秒）</label><input v-model.number="s.rate_limit_queue_timeout_seconds" type="number" min="1" max="600" step="1"/><div class="hint">默认 120 秒。排队超时会尝试其他可用账号；全部繁忙时返回本地限流错误。</div></div>
+          <div class="field"><label>上游响应超时（秒）</label><input v-model.number="s.timeout" type="number" min="5" max="600" step="1" placeholder="300"/><div class="hint">默认 300 秒，范围 5–600 秒。Loomy 非流式聊天和账号测试等待上游响应的超时；长会话压缩可调大。与排队时间独立，关闭主动限流后仍生效。</div></div>
         </div>
         <div class="hint" style="margin-top:12px">保存后生效。间隔和并发都设为 0 即关闭；只限制模型调用，不影响登录、签到和额度查询。多个独立网关进程分别计数。</div>
       </div>
@@ -1620,7 +1621,6 @@ createApp({
         <div class="card-p form-grid">
           <div class="field"><label>后端地址</label><input v-model="s.backend_url" placeholder="https://copilot.tencent.com"/><div class="hint">上游 Work Buddy 服务地址。</div></div>
           <div class="field"><label>默认域名</label><input v-model="s.default_domain" placeholder="www.codebuddy.cn"/><div class="hint">账号 auth 中没有 domain 时使用。</div></div>
-          <div class="field"><label>请求超时（秒）</label><input v-model="s.timeout" type="number" min="30" max="900" placeholder="300"/><div class="hint">长上下文或慢模型建议保持 300。</div></div>
           <div class="field"><label>管理鉴权</label><input v-model="s.admin_auth" disabled/></div>
         </div>
       </div>

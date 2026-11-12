@@ -16,6 +16,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
+from providers.usage import StreamUsage, credit_amount, token_counts
 import resource_sync
 from providers.qoder import cosy
 from providers.qoder import quota as qoder_quota
@@ -243,7 +244,7 @@ def build_body(channel: str, payload: dict) -> tuple[dict, str, str]:
     return body, raw, model
 
 
-def _openai_chunk(model: str, text: str = "", finish: str | None = None, tool_calls: list | None = None) -> bytes:
+def _openai_chunk(model: str, text: str = "", finish: str | None = None, tool_calls: list | None = None, *, usage: dict | None = None) -> bytes:
     delta = {}
     if text:
         delta["content"] = text
@@ -251,6 +252,8 @@ def _openai_chunk(model: str, text: str = "", finish: str | None = None, tool_ca
         delta["tool_calls"] = tool_calls
     choice = {"index": 0, "delta": delta, "finish_reason": finish}
     payload = {"id": "chatcmpl-qoder", "object": "chat.completion.chunk", "model": model, "choices": [choice]}
+    if usage:
+        payload["usage"] = usage
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
@@ -335,8 +338,9 @@ def _texts_from_event(raw: str, *, include_reasoning: bool = True) -> list[str]:
     return texts
 
 
-def _log(channel, api_key_info, account, model_name, finish_reason, status_code, error_msg, started, text_len, *, stream=True):
+def _log(channel, api_key_info, account, model_name, finish_reason, status_code, error_msg, started, text_len, *, stream=True, usage=None):
     info = api_key_info if isinstance(api_key_info, dict) else {}
+    prompt, completion, total = token_counts(usage) if usage else (0, max(1, text_len // 4) if text_len else 0, max(1, text_len // 4) if text_len else 0)
     try:
         db.record_request(
             {
@@ -349,10 +353,10 @@ def _log(channel, api_key_info, account, model_name, finish_reason, status_code,
                 "resolved_model": (api_key_info.get("_resolved_model")
                                    if isinstance(api_key_info, dict) else None) or model_name,
                 "stream": 1 if stream else 0,
-                "prompt_tokens": 0,
-                "completion_tokens": max(1, text_len // 4) if text_len else 0,
-                "total_tokens": max(1, text_len // 4) if text_len else 0,
-                "credit": 0,
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": total,
+                "credit": credit_amount(usage),
                 "finish_reason": finish_reason,
                 "duration_ms": int((time.time() - started) * 1000),
                 "status_code": status_code,
@@ -491,9 +495,11 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name, 
                             _log(channel, api_key_info, account, shown, "error", response.status_code, last, started, 0, stream=client_stream)
                             break
                         text_len = 0
+                        observed = StreamUsage()
                         failed = ""
                         saw_tools = False
                         async for line in response.aiter_lines():
+                            observed.observe(line)
                             try:
                                 pieces, calls = _parts_from_event(line, include_reasoning=False)
                             except QoderChatError as exc:
@@ -507,13 +513,13 @@ async def _stream(channel: str, raw: str, model: str, api_key_info, model_name, 
                                 yield _openai_chunk(shown, tool_calls=calls)
                         if failed:
                             last = failed
-                            _log(channel, api_key_info, account, shown, "error", 400, failed, started, text_len, stream=client_stream)
+                            _log(channel, api_key_info, account, shown, "error", 400, failed, started, text_len, stream=client_stream, usage=observed.usage)
                             break
-                        yield _openai_chunk(shown, finish="tool_calls" if saw_tools else "stop")
-                        yield b"data: [DONE]\n\n"
+                        yield _openai_chunk(shown, finish="tool_calls" if saw_tools else "stop", usage=observed.usage)
                         auth_manager.mark_account_success(account["id"])
                         _log(channel, api_key_info, account, shown, "tool_calls" if saw_tools else "stop",
-                             200, "", started, text_len, stream=client_stream)
+                             200, "", started, text_len, stream=client_stream, usage=observed.usage)
+                        yield b"data: [DONE]\n\n"
                         return
             except rate_limiter.RateLimitError:
                 raise
@@ -656,6 +662,10 @@ async def chat_completions(channel: str, payload: dict, api_key_info: dict | Non
     if payload.get("stream"):
         return ("stream", stream)
     chunks = [chunk async for chunk in stream]
+    observed = StreamUsage()
+    for chunk in chunks:
+        for line in chunk.decode("utf-8").splitlines():
+            observed.observe(line)
     text, error, tool_calls = _aggregate_stream(chunks)
     if error and not text and not tool_calls:
         return ("error", (502, {"error": {"message": error, "type": "server_error"}}))
@@ -668,6 +678,7 @@ async def chat_completions(channel: str, payload: dict, api_key_info: dict | Non
             "id": "chatcmpl-qoder",
             "object": "chat.completion",
             "model": shown,
+            "usage": observed.usage,
             "choices": [
                 {
                     "index": 0,

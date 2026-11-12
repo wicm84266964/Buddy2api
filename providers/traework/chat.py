@@ -16,6 +16,7 @@ import rate_limiter
 
 import auth_manager
 import database as db
+from providers.usage import credit_amount
 from streaming import ClosingStream, close_stream
 from providers.traework.constants import (
     AGENT_API,
@@ -159,13 +160,15 @@ def _parse_usage(raw) -> dict:
     prompt = _intish(raw.get("prompt_tokens"))
     completion = _intish(raw.get("completion_tokens"))
     total = _intish(raw.get("total_tokens")) or (prompt + completion)
-    if not prompt and not completion and not total:
+    if not prompt and not completion and not total and credit_amount(raw) is None:
         return {}
     usage = {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "total_tokens": total,
     }
+    if credit_amount(raw) is not None:
+        usage["credit"] = credit_amount(raw)
     reasoning = _intish(raw.get("reasoning_tokens"))
     if reasoning:
         usage["completion_tokens_details"] = {"reasoning_tokens": reasoning}
@@ -365,7 +368,7 @@ def _log(api_key_info, account, model_name, stream, finish, status, error, t0, u
                 "prompt_tokens": usage.get("prompt_tokens", 0),
                 "completion_tokens": usage.get("completion_tokens", 0),
                 "total_tokens": usage.get("total_tokens", 0),
-                "credit": 0,
+                "credit": credit_amount(usage),
                 "finish_reason": finish,
                 "duration_ms": int((time.time() - t0) * 1000),
                 "status_code": status,
@@ -560,9 +563,9 @@ async def chat_completions(payload: dict, api_key_info: dict | None) -> tuple:
                         finish = "stop"
                     await close_stream(opened)
                     yield _llm_chunk(name, finish=finish, usage=usage)
-                    yield b"data: [DONE]\n\n"
                     auth_manager.mark_account_success(int(current["id"]))
                     _log(api_key_info, current, name, True, finish, 200, "", started, usage)
+                    yield b"data: [DONE]\n\n"
 
                 return ("stream", ClosingStream(_forward(), upstream=events))
             turn = await _collect_llm(account, payload, model)

@@ -112,6 +112,7 @@ class FailureLogMiddleware:
                             "provider": target.get("provider") or key.get("default_channel") or "workbuddy",
                             "model": state["model"], "resolved_model": target.get("resolved_model"),
                             "stream": int(state["stream"]), "finish_reason": "error",
+                            "credit": None,
                             "status_code": status if status >= 400 else 502,
                             "error_msg": "[gateway] " + (failure or error_body.decode("utf-8", "replace"))[:1000],
                             "duration_ms": int((time.monotonic() - started) * 1000),

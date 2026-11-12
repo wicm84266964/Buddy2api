@@ -782,6 +782,15 @@ def test_record_request_updates_log_and_counters_once(isolated_db):
     assert sum(bucket["credit"] for bucket in hourly) == 0.25
 
 
+def test_unknown_credit_does_not_null_account_totals(isolated_db):
+    aid = db.add_account({"name": "unknown-credit", "provider": "loomy"})
+    for credit in (1.25, None, 0, 2):
+        db.record_request({"account_id": aid, "provider": "loomy", "credit": credit})
+    assert db.get_account(aid)["total_credits"] == 3.25
+    assert any(row["credit"] is None for row in db.list_logs())
+    assert db.get_stats()["total_credit"] == 3.25
+
+
 def test_get_stats_supports_period_windows(isolated_db):
     def put_log(created_at, tokens, credit, model="auto"):
         with db.connection() as conn:
