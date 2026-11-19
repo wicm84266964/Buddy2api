@@ -130,6 +130,76 @@ def test_credit_summary_skips_retired_qclaw(isolated_db, monkeypatch):
     assert workbuddy["unit"] == "credit"
 
 
+def test_credit_summary_prefers_available_total_over_total_dosage(isolated_db, monkeypatch):
+    account_id = db.add_account({
+        "name": "exhausted", "uid": "exhausted-1", "provider": "workbuddy",
+        "status": "active", "extra": {},
+    })
+    resource = {
+        "ok": True,
+        "status_code": 200,
+        "account_id": account_id,
+        "account_name": "exhausted",
+        "total_dosage": 500.0,
+        "available_total": 0.0,
+        "expiring_7d_total": 0.0,
+        "expiring_30d_total": 0.0,
+        "package_count": 1,
+        "packages": [],
+        "updated_at": 0,
+    }
+
+    async def fake_fetch(account, *, force=False, max_age_seconds=60):
+        return dict(resource)
+
+    monkeypatch.setattr(auth_manager, "fetch_account_resources", fake_fetch)
+    monkeypatch.setattr(control_plane.providers, "enabled_provider_ids", lambda: ["workbuddy"])
+    payload = asyncio.run(control_plane.credit_summary(force=True))
+
+    workbuddy = next(item for item in payload["channels"] if item["id"] == "workbuddy")
+    assert workbuddy["remaining"] == 0
+    assert payload["low_accounts"][0]["account_id"] == account_id
+    assert payload["low_accounts"][0]["balance"] == 0
+    assert payload["accounts"][0]["total_dosage"] == 500.0
+
+
+def test_credit_summary_failed_resource_has_no_fake_zero_balance(isolated_db, monkeypatch):
+    account_id = db.add_account({
+        "name": "failed", "uid": "failed-1", "provider": "workbuddy",
+        "status": "active", "extra": {},
+    })
+    resource = {
+        "ok": False,
+        "status_code": 503,
+        "account_id": account_id,
+        "account_name": "failed",
+        "total_dosage": 500.0,
+        "available_total": 0.0,
+        "expiring_7d_total": 0.0,
+        "expiring_30d_total": 0.0,
+        "package_count": 0,
+        "packages": [],
+        "updated_at": 0,
+    }
+
+    async def fake_fetch(account, *, force=False, max_age_seconds=60):
+        return dict(resource)
+
+    monkeypatch.setattr(auth_manager, "fetch_account_resources", fake_fetch)
+    monkeypatch.setattr(control_plane.providers, "enabled_provider_ids", lambda: ["workbuddy"])
+    payload = asyncio.run(control_plane.credit_summary(force=True))
+
+    workbuddy = next(item for item in payload["channels"] if item["id"] == "workbuddy")
+    assert workbuddy["remaining"] == 0
+    assert payload["low_accounts"] == []
+    assert payload["accounts"][0]["ok"] is False
+
+    resource.update(ok=True, unsupported=True, expiring_30d_total=10.0)
+    payload = asyncio.run(control_plane.credit_summary(force=True))
+    assert payload["expiring_accounts"][0]["balance"] is None
+    assert payload["low_accounts"] == []
+
+
 def test_startup_does_not_import_by_default(isolated_db, monkeypatch):
     monkeypatch.delenv("CB_GATEWAY_AUTO_IMPORT", raising=False)
     called = []
