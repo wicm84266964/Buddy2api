@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import os
 import secrets
 import sys
@@ -41,6 +42,23 @@ _TOKEN_FIELDS = (
     "name",
     "phone",
 )
+
+
+def _spendable_balance(row) -> float:
+    """First usable spendable balance from a resource row; keeps explicit zero."""
+    if not isinstance(row, dict):
+        return 0.0
+    for key in ("remaining", "available_total", "total_dosage"):
+        value = row.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            return number
+    return 0.0
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -406,7 +424,7 @@ async def _summarize_workbuddy_credit(provider, accounts: list[dict], force: boo
             limit=2,
         )
     ok = [row for row in resources if row.get("ok")]
-    remaining = round(sum(float(row.get("total_dosage") or row.get("available_total") or 0) for row in ok), 4)
+    remaining = round(sum(_spendable_balance(row) for row in ok), 4)
     row = {
         "id": getattr(provider, "id", "workbuddy"),
         "display_name": getattr(provider, "display_name", "workbuddy"),
@@ -554,12 +572,13 @@ async def credit_summary(force: bool = False) -> dict:
     low_accounts = []
     expiring_accounts = []
     for row in workbuddy_resources:
-        balance = float(row.get("total_dosage") or row.get("available_total") or 0)
+        usable = bool(row.get("ok")) and not row.get("unsupported")
+        balance = _spendable_balance(row) if usable else None
         item = {
             "account_id": row.get("account_id"),
             "account_name": row.get("account_name"),
             "channel": row.get("channel") or "workbuddy",
-            "balance": round(balance, 4),
+            "balance": round(balance, 4) if balance is not None else None,
             "expiring_30d_total": round(float(row.get("expiring_30d_total") or 0), 4),
             "next_expire_time": row.get("next_expire_time") or "",
             "next_expire_days": row.get("next_expire_days"),
@@ -567,7 +586,7 @@ async def credit_summary(force: bool = False) -> dict:
             "stale": bool(row.get("stale")),
             "age_seconds": int(row.get("age_seconds") or 0),
         }
-        if row.get("ok") and balance <= 300:
+        if row.get("ok") and balance is not None and balance <= 300:
             low_accounts.append(item)
         if row.get("ok") and float(row.get("expiring_30d_total") or 0) > 0:
             expiring_accounts.append(item)

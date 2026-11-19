@@ -56,7 +56,7 @@ Buddy2api 今天是单一厂商网关：`server.py` 把 `/v1/chat/completions` �
 | Responses 桥 | `responses.py` | `/v1/responses` → `proxy.proxy_chat_completions()` |
 | 存储 | `database.py` | `accounts` **无 `provider` 列**；`add_account` 显式列清单；uid 去重只在应用层；`get_active_accounts()` 跨全部行 |
 | 凭据加密 | `credential_crypto.py` | Windows 无 `CB_GATEWAY_MASTER_KEY` 时写 `enc:v1:dpapi:`，Linux **拒绝**解密 |
-| UI | `web/index.html` | Dashboard「官方总余额」把 `total_dosage` 加总；「一键领取」打 `/admin/accounts/checkin-all` |
+| UI | `web/index.html` | Dashboard「官方总余额」按 `remaining → available_total → total_dosage` 取可花费余额；「一键领取」打 `/admin/accounts/checkin-all` |
 | Docker | `start-docker-win.ps1` / `start-docker-wsl.sh` | WorkBuddy auth 目录不存在则 **`exit 1`**。基线 `docker-compose.yml` 已设 `CB_AUTH_DIR=/auth` 即使没有 volume；`docker-compose.windows.yml` 用 `${CB_HOST_AUTH_DIR:?...}:/auth:ro` |
 | 客户端配额 | `server.py` `_reserve_client_quota` | 在 `proxy.proxy_chat_completions` **之前**占用日限额；今天空仓 503 也会扣次数 |
 
